@@ -1,0 +1,145 @@
+// game.subs —— @game 内建函数处理器（game doc/注解处理器与打包.md）
+//
+// 职责：
+//   1. @game 标注游戏内建：@host 无体声明，函数体由壳工程 game-app/js/game-runtime.js
+//      用 KAPLAY 实现（产物 app.js 以裸名调用同名全局函数）。
+//   2. 态度校验：白名单（防笔误：未实现的名字编译期报错而非运行期崩溃）、
+//      @host（无体合法性）、@impure（桥接有副作用）、无体。
+//   3. 编译后阶段（@postcompile build）：把 JS 产物与壳工程资源组装成
+//      可直接打开的网页游戏目录（game-app/build/package-game.ps1）。
+// @postcompile build
+
+fun checkFuns(xs: List[Str]): Null =
+    when (xs) {
+        Nil => null
+        is Cons(f, rest) => { checkOne(f); checkFuns(rest) }
+        else => null
+    }
+
+fun checkOne(fn: Str): Null {
+    if (!funHasAnnotation(fn, "game")) null else {
+        var anns: List[Str] = funAnnotations(fn);
+        checkWhitelist(fn);
+        checkHost(fn);
+        checkImpure(fn, anns);
+        checkNoBody(fn)
+    }
+}
+
+fun checkWhitelist(fn: Str): Null {
+    if (isGameBuiltin(fn)) null
+    else processorError("@game 函数 " + fn + " 不在游戏桥白名单内。白名单见 game doc/游戏库.md：gameStart/gameGravity/sceneAdd/sceneGo/viewWidth/viewHeight/spriteLoad/comp*(13 个)/obj*(14 个)/vecX/vecY/输入 6 个/循环 4 个/碰撞 4 个")
+}
+
+fun checkHost(fn: Str): Null {
+    if (funHasAnnotation(fn, "host")) null
+    else processorError("@game 函数 " + fn + " 缺 @host：游戏内建的合法性来自 @host（无体声明，体由壳注入）")
+}
+
+fun checkImpure(fn: Str, anns: List[Str]): Null {
+    if (containsAnno(anns, "impure")) null
+    else processorWarn("@game 函数 " + fn + " 缺 @impure：桥接 KAPLAY 有副作用")
+}
+
+fun checkNoBody(fn: Str): Null {
+    if (funHasBody(fn)) processorError("@game 函数 " + fn + " 不应有函数体：实现位于壳的 game-runtime.js，此处声明即接口")
+    else null
+}
+
+fun containsAnno(xs: List[Str], a: Str): Bool =
+    when (xs) {
+        Nil => false
+        is Cons(h, rest) => if (startsWith(h, a)) true else containsAnno(rest, a)
+        else => false
+    }
+
+fun isGameBuiltin(fn: Str): Bool =
+    when (fn) {
+        // 引擎与场景（game.subl）
+        "gameStart" => true
+        "gameGravity" => true
+        "sceneAdd" => true
+        "sceneGo" => true
+        "viewWidth" => true
+        "viewHeight" => true
+        // 资源（sprite.subl）
+        "spriteLoad" => true
+        // 组件
+        "compSprite" => true
+        "compPos" => true
+        "compScale" => true
+        "compRect" => true
+        "compCircle" => true
+        "compText" => true
+        "compColorHex" => true
+        "compArea" => true
+        "compBody" => true
+        "compSolid" => true
+        "compTag" => true
+        "compAnchor" => true
+        // 对象
+        "objAdd" => true
+        "objUse" => true
+        "objDestroy" => true
+        "objExists" => true
+        "objMove" => true
+        "objSetPos" => true
+        "objSetScale" => true
+        "objPos" => true
+        "objTextSet" => true
+        "objTag" => true
+        // 向量
+        "vecX" => true
+        "vecY" => true
+        // 输入（input.subl）
+        "onKeyDown" => true
+        "onKeyPress" => true
+        "onKeyRelease" => true
+        "onMouseDown" => true
+        "mousePosX" => true
+        "mousePosY" => true
+        // 循环（loop.subl）
+        "onUpdate" => true
+        "frameDt" => true
+        "every" => true
+        "after" => true
+        // 碰撞（collision.subl）
+        "objOnCollide" => true
+        "objIsColliding" => true
+        "objsByTag" => true
+        "objsDestroyTag" => true
+        else => false
+    }
+
+// ---------- 编译后阶段：组装网页游戏目录 ----------
+// 期望编译参数（-A key=value）：
+//   gameApp=壳工程目录（含 build/package-game.ps1）；gameJs=JS 产物路径；
+//   gameOut=输出目录（默认 gameApp\build\game）。缺 gameApp/gameJs 时跳过。
+// 键名刻意避开 android 处理器的 appDir/jsPath/outDir/sdkDir 命名空间，
+// 便于与主仓内建处理器共存（从主仓根目录编译时）。
+
+fun build(): Null {
+    var appDir: Str = optionOr("gameApp", "")
+    var jsPath: Str = optionOr("gameJs", "")
+    var outDir: Str = optionOr("gameOut", appDir + "\\build\\game")
+    if (appDir == "") processorInfo("游戏打包：未给 gameApp，跳过")
+    else if (jsPath == "") processorInfo("游戏打包：未给 gameJs，跳过")
+    else {
+        var script: Str = appDir + "\\build\\package-game.ps1"
+        if (!fileExists(script)) processorError("打包脚本不存在：" + script + "（gameApp 应指向 game-app 壳工程目录）")
+        else {
+            processorInfo("游戏打包开始：" + outDir)
+            var res: Str = runShell("powershell -ExecutionPolicy Bypass -File \"" + script + "\" -JsPath \"" + jsPath + "\" -OutDir \"" + outDir + "\"")
+            reportResult(res)
+        }
+    }
+    null
+}
+
+fun reportResult(res: Str): Null {
+    if (startsWith(res, "0|")) processorInfo("游戏就绪：" + res)
+    else processorError("游戏打包失败：" + res)
+    null
+}
+
+checkFuns(funNames(0))

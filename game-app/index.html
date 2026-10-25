@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sublimation for Game — 豆豆躲方块</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #202028; overflow: hidden; }
+    /* KAPLAY 把 canvas 追加到 body，默认居中；这里保底样式。 */
+  </style>
+</head>
+<body>
+  <!-- 载入顺序：KAPLAY → 桥运行时（ @host 实现）→ Sublimation 编译产物（main 自执行） -->
+  <script src="vendor/kaplay.js"></script>
+  <script src="js/game-runtime.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

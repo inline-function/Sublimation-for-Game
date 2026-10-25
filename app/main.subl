@@ -1,0 +1,51 @@
+// main.subl —— 最小游戏 demo：豆豆躲方块
+//
+// 玩法：左右方向键移动豆豆，躲避天上掉落的红色方块；
+//       被砸中即 Game Over，按空格回到场景重开。
+//
+// 覆盖游戏库四条主线（game doc/游戏库.md）：
+//   精灵 spriteLoad / spriteAdd / rectAdd / textAdd
+//   输入 onKeyDown / onKeyPress
+//   循环 onUpdate / every
+//   碰撞 objAddArea / objOnCollide / objDestroy / objTag
+
+// 刷一个敌人：随机 x、红色方块、下落、出屏销毁。
+@impure
+fun spawnEnemy(): Null {
+    var x = 40.0 + (rand() * 560.0)
+    var e = rectAdd(28.0, 28.0, x, -30.0, "#ff4444")
+    objAddArea(e)
+    objTag(e, "enemy")
+    onUpdate({ dt => objMove(e, 0.0, 180.0 * dt) })
+    onUpdate({ _dt => if (objTop(e) > 520.0) objDestroy(e) })
+    null
+}
+
+@impure
+fun main(): Null {
+    gameStart(640, 480)
+    spriteLoad("bean", "assets/bean.png")
+
+    @mut var score: Int = 0
+
+    var player = spriteAdd("bean", 300.0, 400.0)
+    objAddArea(player)
+    var label = textAdd("score: 0", 16.0, 16.0, 24.0)
+
+    // 输入：左右移动
+    onKeyDown("left") { _e => objMove(player, -6.0, 0.0) }
+    onKeyDown("right") { _e => objMove(player, 6.0, 0.0) }
+
+    // 循环：每秒计分 + 刷怪；每帧刷新分数文字
+    every(1.0) { _e => score = score + 1 }
+    every(1.0) { _e => spawnEnemy() }
+    onUpdate({ _dt => objTextSet(label, concat("score: ", toStr(score))) })
+
+    // 碰撞：玩家撞上敌人 → 游戏结束
+    objOnCollide(player, "enemy") { _o =>
+        objDestroy(player)
+        textAdd("Game Over  按空格重开", 120.0, 220.0, 32.0)
+        onKeyPress("space") { _e => sceneGo("main") }
+    }
+    null
+}
