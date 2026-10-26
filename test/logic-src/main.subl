@@ -1,0 +1,90 @@
+// 纯逻辑自检（node 侧）：把 tetris-logic 的核心不变式逐条打印 PASS/FAIL。
+// 与 app/tetris-logic.subl 同目录的 logic.subl 是同步副本（由 test/tetris-logic-test.js 拷入）。
+// 运行：node test/tetris-logic-test.js（它负责同步副本、编译、跑产物、统计行）。
+
+@impure
+fun check(name: Str, cond: Bool): Null =
+    if (cond) print(concat("PASS ", name))
+    else print(concat("FAIL ", name))
+
+@impure
+fun checkN(name: Str, got: Nat, want: Nat): Null =
+    if (got == want) print(concat("PASS ", name))
+    else print(concat(concat("FAIL ", name), concat(" got=", toStr(got))))
+
+@impure
+fun checkS(name: Str, got: Str, want: Str): Null =
+    if (got == want) print(concat("PASS ", name))
+    else print(concat(concat("FAIL ", name), concat(" got=", got)))
+
+@impure
+fun main(): Null {
+    var b = newBoard()
+    checkS("空棋盘格为空", cellAt(b, 0, 0), "")
+    checkS("空棋盘角格为空", cellAt(b, 19, 9), "")
+
+    // 碰撞：I 横放可放
+    check("I 横放(3,0) 可放", canPlace(b, 0, 0, 3, 0))
+    check("I 横放(7,0) 越右界不可放", !canPlace(b, 0, 0, 7, 0))
+    check("I 横放(-1,0) 越左界不可放", !canPlace(b, 0, 0, -1, 0))
+    // I 竖放 4 高：y=16 可放，y=17 越底界
+    check("I 竖放(3,16) 可放", canPlace(b, 0, 1, 3, 16))
+    check("I 竖放(3,17) 越底界不可放", !canPlace(b, 0, 1, 3, 17))
+
+    // 锁定 + 碰撞记忆
+    var b2 = lockPiece(b, 0, 0, 3, 19, "#0ff")
+    checkS("锁定后格染色", cellAt(b2, 19, 3), "#0ff")
+    checkS("锁定旁格仍空", cellAt(b2, 19, 8), "")
+    check("原位再放被占不可放", !canPlace(b2, 0, 0, 3, 19))
+
+    // 行消除：把底行填满（I×2 + O×2 覆盖 0..9 列）
+    var b3 = lockPiece(b, 1, 0, 8, 18, "#ff0")
+    var b4 = lockPiece(b3, 0, 0, 0, 19, "#0ff")
+    var b5 = lockPiece(b4, 0, 0, 4, 19, "#0ff")
+    checkN("底行填满后满行数=1", countFullLines(b5), 1)
+    var b6 = clearedBoard(b5)
+    checkS("消行后底行已空", cellAt(b6, 19, 3), "")
+    checkS("消行后 O 格从 18 顺延到 19", cellAt(b6, 19, 8), "#ff0")
+    checkS("消行后 18 行的 O 位已空", cellAt(b6, 18, 8), "")
+    checkN("消行后满行数=0", countFullLines(b6), 0)
+    var b7 = lockPiece(b6, 0, 0, 3, 17, "#0ff")
+    checkN("再锁一行后满行数=0", countFullLines(b7), 0)
+
+    // 计分分档
+    checkN("scoreFor(0)=0", scoreFor(0), 0)
+    checkN("scoreFor(1)=100", scoreFor(1), 100)
+    checkN("scoreFor(2)=300", scoreFor(2), 300)
+    checkN("scoreFor(3)=500", scoreFor(3), 500)
+    checkN("scoreFor(4)=800", scoreFor(4), 800)
+
+    // 升级触发：每 10 行升一级
+    checkN("levelFor(0)=1", levelFor(0), 1)
+    checkN("levelFor(9)=1", levelFor(9), 1)
+    checkN("levelFor(10)=2", levelFor(10), 2)
+    checkN("levelFor(19)=2", levelFor(19), 2)
+    checkN("levelFor(20)=3", levelFor(20), 3)
+    checkN("levelFor(30)=4", levelFor(30), 4)
+    checkN("levelFor(100)=10 封顶", levelFor(100), 10)
+
+    // 提速表
+    check("fallInterval(1)=0.80", fallInterval(1) == 0.80)
+    check("fallInterval(2)=0.72", fallInterval(2) == 0.72)
+    check("fallInterval(10)=0.08 封顶", fallInterval(10) == 0.08)
+
+    // 结局判定：出生位被压即 Game Over
+    var b8 = lockPiece(b, 2, 0, 3, 0, "#a0f")
+    check("出生位被压 → isGameOver", isGameOver(b8, 0))
+    check("空盘 → 未结局", !isGameOver(b, 0))
+
+    // 旋转：nextRot 环回
+    checkN("nextRot(0)=1", nextRot(0), 1)
+    checkN("nextRot(3)=0", nextRot(3), 0)
+
+    // 渲染格清单：I 横放(3,19) 应给 4 个格
+    checkN("shapeCells I 横放=4 格", size(shapeCells(shapeOf(0, 0), 3, 19, 0)), 4)
+    checkN("boardCells 空盘=0 格", size(boardCells(newBoard(), 0)), 0)
+    checkN("boardCells 锁定 I=4 格", size(boardCells(b2, 0)), 4)
+
+    print("LOGIC-DONE")
+    null
+}

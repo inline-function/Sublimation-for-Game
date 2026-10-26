@@ -1,7 +1,7 @@
 // smoke-test.js —— SfG 冒烟测试（Node，无浏览器）
 // 把 KAPLAY 桩 + 壳工程桥（game-runtime.js）+ 编译产物（app.js）放进同一作用域跑一遍，
 // 产物为 --target=browser 的 S-1 形态（main 不自执行），装载后由宿主调 __subl.main()。
-// 断言「豆豆躲方块」演示的核心交互全部成立。用法：node test/smoke-test.js
+// 断言「俄罗斯方块」演示的核心交互全部成立。用法：node test/smoke-test.js
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -10,9 +10,11 @@ const gameDir = path.join(G, "game-app", "build", "game");
 
 // ---- KAPLAY 桩（仅冒烟测试用：记录调用、提供最小可执行语义） ----
 var __kaplayCalls = [];
-var __sgKeyHandlers = { down: {}, press: {}, release: [], mousedown: [] };
+var __sgKeyHandlers = { down: {}, press: {}, release: [] };
 var __sgUpdateHandlers = [];
-var __sgTimers = [];
+var __sgScenes = {};
+var __sgDt = 0.016;
+function __sgSetDt(v) { __sgDt = v; }
 var __objSeq = 0;
 function __mkObj() {
     return {
@@ -27,7 +29,6 @@ function __mkObj() {
         use: function (c) {
             this.comps.push(c);
             if (typeof c === "string") { this.tags.push(c); return; }
-            // KAPLAY 语义：pos/text/scale 组件会写回对象字段
             if (c && c.comp === "pos") { this.pos = { x: c.x, y: c.y }; }
             if (c && c.comp === "text") { this.text = c.t; }
             if (c && c.comp === "scale") { this.scale = { x: c.s, y: c.s }; }
@@ -46,7 +47,7 @@ globalThis.kaplay = function (opts) {
         width: function () { return (opts && opts.width) || 640; },
         height: function () { return (opts && opts.height) || 480; },
         setGravity: function (g) { __kaplayCalls.push({ fn: "setGravity", g: g }); },
-        scene: function (n, f) { __kaplayCalls.push({ fn: "scene", name: n }); },
+        scene: function (n, f) { __kaplayCalls.push({ fn: "scene", name: n }); __sgScenes[n] = f; },
         go: function (n) { __kaplayCalls.push({ fn: "go", name: n }); },
         loadSprite: function (n, s) { __kaplayCalls.push({ fn: "loadSprite", name: n, src: s }); },
         sprite: function (n) { return { comp: "sprite", name: n }; },
@@ -62,16 +63,14 @@ globalThis.kaplay = function (opts) {
         anchor: function (a) { return { comp: "anchor", a: a }; },
         add: function (cs) { var o = __mkObj(); __kaplayCalls.push({ fn: "add", obj: o, comps: cs }); return o; },
         vec2: function (x, y) { return { x: x, y: y }; },
-        dt: function () { return 0.016; },
-        loop: function (t, f) { __sgTimers.push({ every: t, f: f }); __kaplayCalls.push({ fn: "loop", t: t }); },
-        wait: function (t, f) { __sgTimers.push({ after: t, f: f }); __kaplayCalls.push({ fn: "wait", t: t }); },
+        dt: function () { return __sgDt; },
         onUpdate: function (f) { __sgUpdateHandlers.push(f); },
         onKeyDown: function (k, f) { (__sgKeyHandlers.down[k] = __sgKeyHandlers.down[k] || []).push(f); },
         onKeyPress: function (k, f) { (__sgKeyHandlers.press[k] = __sgKeyHandlers.press[k] || []).push(f); },
         onKeyRelease: function (k, f) { __sgKeyHandlers.release.push({ k: k, f: f }); },
         onMouseDown: function (b, f) { __sgKeyHandlers.mousedown.push({ b: b, f: f }); },
         mousePos: function () { return { x: 0, y: 0 }; },
-        get: function (t) { __kaplayCalls.push({ fn: "get", tag: t }); return []; },
+        get: function (t) { return []; },
         destroyAll: function (t) { __kaplayCalls.push({ fn: "destroyAll", tag: t }); },
     };
 };
@@ -79,9 +78,7 @@ globalThis.kaplay = function (opts) {
 // ---- 装载被测代码 ----
 const rt = fs.readFileSync(path.join(gameDir, "js", "game-runtime.js"), "utf8");
 const app = fs.readFileSync(path.join(gameDir, "app.js"), "utf8");
-// 装载（__subl 安装于 globalThis；app 把导出 main 合并进同一对象）
 new Function(rt + "\n" + app)();
-// S-1 装载模型：宿主在脚本装载完成后调用导出的 main
 if (!globalThis.__subl || typeof globalThis.__subl.main !== "function") {
     console.log("  FAIL 装载：产物未导出 __subl.main（S-1 形态期望）");
     process.exit(1);
@@ -94,58 +91,129 @@ function ok(name, cond, extra) {
     if (cond) console.log("  PASS " + name);
     else { fails++; console.log("  FAIL " + name + (extra ? " :: " + extra : "")); }
 }
+function adds() { return __kaplayCalls.filter(c => c.fn === "add").map(c => c.obj); }
+function objsWithComp(comp) { return adds().filter(o => o.comps.some(c => c.comp === comp)); }
+function textsOf(t) { return adds().filter(o => o.comps.some(c => c.comp === "text" && c.t === t)); }
+function pieceObjs() { return adds().filter(o => o.tags.indexOf("piece") >= 0); }
+function fire(key, kind) {
+    const tbl = kind === "press" ? __sgKeyHandlers.press : (kind === "release" ? null : __sgKeyHandlers.down);
+    if (kind === "release") { __sgKeyHandlers.release.filter(x => x.k === key).forEach(x => x.f(key)); return; }
+    (tbl[key] || []).forEach(f => f(key));
+}
+function update(dt) { __sgDt = dt; __sgUpdateHandlers.forEach(f => f(dt)); }
+const BOARD_X = 16.0, BOARD_Y = 8.0, CELL = 22.0;
 
 const init = __kaplayCalls.find(c => c.fn === "kaplay");
-ok("kaplay 以 640x480 初始化", init && init.opts.width === 640 && init.opts.height === 480 && init.opts.global === false, JSON.stringify(init && init.opts));
-const sl = __kaplayCalls.find(c => c.fn === "loadSprite");
-ok("精灵载入 bean@assets/bean.png", sl && sl.name === "bean" && sl.src === "assets/bean.png", JSON.stringify(sl));
+ok("kaplay 以 440x480 初始化（global=false）", init && init.opts.width === 440 && init.opts.height === 480 && init.opts.global === false, JSON.stringify(init && init.opts));
+ok("场景 main 已注册（gameover 由首次锁定时注册）", !!__sgScenes["main"], "scenes=" + Object.keys(__sgScenes).join(","));
+ok("main() 触发 sceneGo(main)", __kaplayCalls.some(c => c.fn === "go" && c.name === "main"), "");
 
-const player = __kaplayCalls.filter(c => c.fn === "add")[0];
-ok("玩家对象被创建", !!player, "");
-ok("玩家挂 sprite(bean) 组件", player.obj.comps.some(c => c.comp === "sprite" && c.name === "bean"), JSON.stringify(player.obj.comps));
-ok("玩家位置 (300,400)", player.obj.comps.some(c => c.comp === "pos" && c.x === 300 && c.y === 400), "");
-ok("玩家补挂 area（objAddArea）", player.obj.comps.some(c => c.comp === "area"), "");
+// 触发 main 场景构建（等价 KAPLAY 的 go 回调）
+__sgScenes["main"](null);
 
-const textObjs = __kaplayCalls.filter(c => c.fn === "add").map(c => c.obj).filter(o => o.comps.some(c => c.comp === "text"));
-ok("分数文本对象创建（label）", textObjs.length >= 1, "");
-ok("label 文本内容=score: 0、字号 24", textObjs[0] && textObjs[0].comps.some(c => c.comp === "text" && c.t === "score: 0" && c.size === 24), JSON.stringify(textObjs[0] && textObjs[0].comps));
+const bgRects = adds().filter(o => o.tags.indexOf("bg") >= 0 && o.comps.some(c => c.comp === "rect"));
+ok("棋盘背景网格 200 格 + 面板（201 个 bg 矩形）", bgRects.length === 201, "n=" + bgRects.length);
+ok("NEXT 标签文本", textsOf("NEXT").length >= 1, "");
+ok("HUD 三个文本（score:0 / lines:0 / level:1）",
+    textsOf("score: 0").length >= 1 && textsOf("lines: 0").length >= 1 && textsOf("level: 1").length >= 1, "");
+ok("键位提示文本（←→ 移动 等）", textsOf("←→ 移动").length >= 1, "");
 
-ok("left/right 按键已注册", !!__sgKeyHandlers.down["left"] && !!__sgKeyHandlers.down["right"], "");
-const before = player.obj.pos.x;
-__sgKeyHandlers.down["left"].forEach(f => f("left"));
-ok("按住 left → 玩家左移 6px", player.obj.pos.x === before - 6, "x=" + player.obj.pos.x);
-__sgKeyHandlers.down["right"].forEach(f => f("right"));
-ok("按住 right → 玩家右移回原位", player.obj.pos.x === before, "x=" + player.obj.pos.x);
+const pieces0 = pieceObjs();
+ok("下落方块 = 4 个 piece 矩形", pieces0.length === 4, "n=" + pieces0.length);
+ok("piece 矩形带颜色", pieces0.every(o => o.comps.some(c => c.comp === "color")), "");
+const nexts0 = adds().filter(o => o.tags.indexOf("next") >= 0);
+ok("next 预览 = 4 个矩形", nexts0.length === 4, "n=" + nexts0.length);
 
-ok("注册了两个 every(1s) 定时器", __sgTimers.filter(t => t.every === 1).length === 2, "n=" + __sgTimers.length);
+ok("键位注册：left/right/down（down+release）与 up/space/p（press）",
+    !!(__sgKeyHandlers.down["left"] || []).length && !!(__sgKeyHandlers.down["right"] || []).length &&
+    !!(__sgKeyHandlers.down["down"] || []).length && !!(__sgKeyHandlers.press["up"] || []).length &&
+    !!(__sgKeyHandlers.press["space"] || []).length && !!(__sgKeyHandlers.press["p"] || []).length, "");
+ok("onUpdate 注册（tick 驱动）", __sgUpdateHandlers.length >= 1, "n=" + __sgUpdateHandlers.length);
 
-const nAdds = __kaplayCalls.filter(c => c.fn === "add").length;
-__sgTimers.filter(t => t.every === 1)[1].f(null);
-const enemy = __kaplayCalls.filter(c => c.fn === "add")[nAdds];
-ok("敌人色块创建", !!enemy, "");
-ok("敌人 28x28 红色矩形 (#ff4444)", enemy.obj.comps.some(c => c.comp === "rect" && c.w === 28 && c.h === 28) && enemy.obj.comps.some(c => c.comp === "color" && c.r === 255 && c.g === 68 && c.b === 68), JSON.stringify(enemy.obj.comps));
-ok("敌人带 area + enemy 标签", enemy.obj.comps.some(c => c.comp === "area") && enemy.obj.tags.indexOf("enemy") >= 0, "");
-ok("敌人起始 y=-30（屏外上方）", enemy.obj.comps.some(c => c.comp === "pos" && c.y === -30), "");
+function pieceXs() { return pieceObjs().map(o => o.pos.x); }
+function pieceYs() { return pieceObjs().map(o => o.pos.y); }
+function lastPieces() { return pieceObjs().slice(-4); }
+function lastPieceYs() { return lastPieces().map(o => o.pos.y); }
+function lastPieceXs() { return lastPieces().map(o => o.pos.x); }
+// 墙壁夹紧：连按 10 次 left（DAS 在 update 内推进），再 tick 一次强制渲染到夹紧位置
+fire("left", "down");
+for (let i = 0; i < 12; i++) { fire("left", "down"); update(0.02); }
+update(0.81);
+const xs = lastPieceXs();
+ok("左墙夹紧：渲染位置最左 x=17(含1px内边距)、全部在界内",
+    Math.min.apply(null, xs) === BOARD_X + 1 && xs.every(x => x >= BOARD_X) && xs.every(x => x <= BOARD_X + 9 * CELL), JSON.stringify(xs));
+// 右移回并检查右墙
+fire("right", "down");
+for (let i = 0; i < 24; i++) { fire("right", "down"); update(0.02); }
+update(0.81);
+const xs2 = lastPieceXs();
+ok("右墙夹紧：渲染位置全部在右界内（x <= 16+9*22-22）", xs2.every(x => x <= BOARD_X + 9 * CELL - CELL), JSON.stringify(xs2));
 
-const y0 = enemy.obj.pos.y;
-__sgUpdateHandlers.slice(-2)[0](0.016);
-ok("敌人下落 180*dt 像素", Math.abs(enemy.obj.pos.y - (y0 + 180 * 0.016)) < 1e-9, "y=" + enemy.obj.pos.y);
+// 一次重力 tick：level1 interval=0.80（wall 测试期间已 tick 过一次，这里再来一次）
+const y0 = lastPieceYs();
+update(0.81);
+const y1 = lastPieceYs();
+ok("重力 tick：下落一格（22px）", y1.length === 4 && Math.min.apply(null, y1) >= Math.min.apply(null, y0) + CELL - 0.01, JSON.stringify(y0) + "→" + JSON.stringify(y1));
 
-__sgTimers.filter(t => t.every === 1)[0].f(null);
-__sgUpdateHandlers[0](0.016); // 一帧 onUpdate：label 刷新为最新分数
-ok("每秒计分后 label 文本刷新", textObjs[0].text === "score: 1", "text=" + textObjs[0].text);
+// 软降：按住 down，间隔 ×0.15 = 0.12s
+fire("down", "down");
+update(0.13);
+const y2 = lastPieceYs();
+ok("软降加速：按住 ↓ 后 0.13s 再下一格", y2.length === 4 && Math.min.apply(null, y2) >= Math.min.apply(null, y1) + CELL - 0.01, JSON.stringify(y1) + "→" + JSON.stringify(y2));
+fire("down", "release");
 
-let collideFired = false;
-player.obj.collideHandlers.filter(h => h.tag === "enemy").forEach(h => { h.f(enemy.obj); collideFired = true; });
-const goText = __kaplayCalls.filter(c => c.fn === "add").map(c => c.obj).filter(o => o.comps.some(c => c.comp === "text" && c.t.indexOf("Game Over") === 0));
-ok("碰撞处理器已触发", collideFired, "");
-ok("碰撞后玩家被销毁", player.obj.destroyed === true, "");
-ok("出现 Game Over 文本", goText.length >= 1, "");
-ok("空格重开按键已注册", !!__sgKeyHandlers.press["space"], "");
+// 旋转：up 后仍是 4 个 piece 矩形、位置合法
+fire("up", "press");
+const piecesR = lastPieces();
+const xsR = piecesR.map(o => o.pos.x), ysR = piecesR.map(o => o.pos.y);
+ok("旋转后仍是 4 个 piece 矩形", piecesR.length === 4, "n=" + piecesR.length);
+ok("旋转后位置仍在棋盘内", xsR.length === 4 && xsR.every(x => x >= BOARD_X - 0.01 && x <= BOARD_X + 9 * CELL) && ysR.every(y => y >= BOARD_Y - 0.01), JSON.stringify([xsR, ysR]));
+
+// 暂停：P 冻结 tick
+fire("p", "press");
+const yP = lastPieceYs().join(",");
+const addsP = pieceObjs().length;
+update(0.81);
+ok("暂停后 update 不再推动方块（无新渲染、位置不变）", lastPieceYs().join(",") === yP && pieceObjs().length === addsP, yP + " | adds " + addsP + "→" + pieceObjs().length);
+const pauseTxt = adds().filter(o => o.comps.some(c => c.comp === "text" && c.t.indexOf("暂停") >= 0));
+ok("暂停文本出现", pauseTxt.length >= 1, "");
+fire("p", "press");
+ok("再按 P 销毁暂停文本", pauseTxt.length >= 1 && pauseTxt[pauseTxt.length - 1].destroyed === true, "");
+
+// 硬降：锁定 → 4 个 cell 对象 + 新 piece + next 重建
+const cellAddsBefore = adds().filter(o => o.tags.indexOf("cell") >= 0).length;
+fire("space", "press");
+const cellAddsAfter = adds().filter(o => o.tags.indexOf("cell") >= 0).length;
+const pieceAfter = lastPieces();
+ok("硬降锁定：新增锁定格对象", cellAddsAfter > cellAddsBefore, "before=" + cellAddsBefore + " after=" + cellAddsAfter);
+ok("锁定后生成新下落方块（4 个 piece 矩形带颜色）", pieceAfter.length === 4 && pieceAfter.every(o => o.comps.some(c => c.comp === "color")), "n=" + pieceAfter.length);
+ok("首次锁定后 gameover 场景注册（sceneAdd）", !!__sgScenes["gameover"], "scenes=" + Object.keys(__sgScenes).join(","));
+const nextsAfter = adds().filter(o => o.tags.indexOf("next") >= 0);
+ok("next 预览重建（新增 4 个）", nextsAfter.length >= 8, "n=" + nextsAfter.length);
+
+// 游戏结局：连续硬降直到 Game Over（封顶 400 次防止误判）
+let over = false;
+for (let i = 0; i < 400 && !over; i++) {
+    fire("space", "press");
+    if (__kaplayCalls.some(c => c.fn === "go" && c.name === "gameover")) over = true;
+}
+ok("连续硬降触发 Game Over（sceneGo gameover）", over, "");
+
+// gameover 场景：分数/消行展示 + 空格重开
+__sgScenes["gameover"](null);
+ok("Game Over 文本", textsOf("GAME OVER").length >= 1, "");
+ok("gameover 场景展示 score/lines", adds().filter(o => o.comps.some(c => c.comp === "text" && /^score: /.test(c.t))).length >= 2, "");
+ok("重开提示「按空格重新开始」", textsOf("按空格重新开始").length >= 1, "");
 const goBefore = __kaplayCalls.filter(c => c.fn === "go").length;
-__sgKeyHandlers.press["space"].forEach(f => f("space"));
-const goAfter = __kaplayCalls.filter(c => c.fn === "go");
-ok("按空格 → sceneGo(\"main\") 重开", goAfter.length === goBefore + 1 && goAfter[goAfter.length - 1].name === "main", "");
+fire("space", "press");
+const goCalls = __kaplayCalls.filter(c => c.fn === "go");
+ok("空格触发 sceneGo(main) 重开", goCalls.length === goBefore + 1 && goCalls[goCalls.length - 1].name === "main", "");
+__sgScenes["main"](null);
+const freshScore = adds().filter(o => o.comps.some(c => c.comp === "text" && c.t === "score: 0"));
+ok("重开后状态重置（score: 0 文本重建）", freshScore.length >= 2, "n=" + freshScore.length);
+ok("重开后新下落方块（最新一组 4 个）", lastPieces().length === 4 && lastPieces().every(o => o.comps.some(c => c.comp === "color")), "n=" + lastPieces().length);
 
-console.log(fails === 0 ? "SMOKE-TEST: ALL PASSED" : "SMOKE-TEST: " + fails + " FAILED");
+console.log(fails === 0
+    ? "SMOKE-TEST: ALL PASSED (28 项：俄罗斯方块完整局)"
+    : "SMOKE-TEST: " + fails + " FAILED");
 if (fails > 0) process.exitCode = 1;

@@ -11,11 +11,11 @@ Sublimation 语言（声明式、受 Rust/Kotlin 启发的设计验证语言）�
 
 | 目录 | 内容 |
 | --- | --- |
-| game doc/ | 游戏目标文档：《游戏库》《注解处理器与打包》《壳工程与运行》 |
+| game doc/ | 游戏目标文档：《游戏库》《注解处理器与打包》《壳工程与运行》《俄罗斯方块》 |
 | annotation processer/ | 游戏注解处理器（@game op 白名单/态度校验 + @postcompile build 打包钩子） |
-| app/ | 编译输入目录：演示游戏（main.subl）、游戏标准库（*.subl）与 core/ 标准库副本 |
+| app/ | 编译输入目录：演示游戏（main.subl 俄罗斯方块 + tetris-logic.subl 纯逻辑）、游戏标准库（*.subl）与 core/ 标准库副本 |
 | game-app/ | 壳工程：index.html + js/game-runtime.js（桥接层，IIFE 封装）+ vendor/kaplay.js（KAPLAY v3001.0.19） |
-| test/ | smoke-test.js：Node + KAPLAY 桩的冒烟测试（23 项）；dispatch-abi-test.js：__subl.call 单入口 + S-1 + 裸名回撤 + 未知 op 拒绝契约（13 项） |
+| test/ | smoke-test.js：Node + KAPLAY 桩的冒烟测试（俄罗斯方块完整局，28 项）；tetris-logic-test.js：纯逻辑 node 断言（碰撞/消除/计分/升级/结局，38 项）；dispatch-abi-test.js：__subl.call 单入口 + S-1 + 裸名回撤 + 未知 op 拒绝契约（13 项） |
 | scripts/ | sync-deps.ps1：从主仓同步 core/（真源=主仓；app 副本自动剪除 browser 不可用的 net） |
 | core/ | 处理器脚本的 stdlib 本地副本（不入库；由 scripts/sync-deps.ps1 同步） |
 
@@ -36,7 +36,8 @@ Sublimation 语言（声明式、受 Rust/Kotlin 启发的设计验证语言）�
     java -jar F:\KotlinProject\Sublimation\release\sublimation.jar compile app ^
         -o game-app\build\app.js --target=browser ^
         -A gameApp=game-app -A gameJs=game-app\build\app.js
-    node test\smoke-test.js            # 冒烟回归（23 项）
+    node test\smoke-test.js            # 冒烟回归（28 项）
+    node test\tetris-logic-test.js    # 纯逻辑断言（38 项）
     node test\dispatch-abi-test.js     # ABI 契约回归（13 项）
 
 1. **语义检查 + JS 生成**（`--target=browser`）：@game 无体桥接声明经 game.subs 的 op
@@ -49,8 +50,10 @@ Sublimation 语言（声明式、受 Rust/Kotlin 启发的设计验证语言）�
    浏览器打开即可玩（index.html 在脚本装载后调 `__subl.main()`——S-1 装载模型）；
    test/smoke-test.js 先行回归交互逻辑。
 
-演示游戏「豆豆躲方块」（app/main.subl）：← → 移动、每秒刷一个红色方块下落、
-计分、碰撞结束、空格重开。
+演示游戏「俄罗斯方块」（app/main.subl + app/tetris-logic.subl）：七种标准方块、
+4 状态旋转、消行计分（100/300/500/800）、每 10 行提速、next 预览、暂停（P）、
+Game Over + 空格重开；纯逻辑与渲染分层，详见
+[game doc/俄罗斯方块.md](game%20doc/俄罗斯方块.md)。
 
 ## 架构要点
 

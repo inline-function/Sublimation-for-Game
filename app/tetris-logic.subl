@@ -1,0 +1,264 @@
+// t46 之后：解释器对**尾位**调用做了 TCO（O(1) JVM 栈），这里的纯逻辑
+// 按语言约束组织：所有纯函数的递归都带严格变小的参数（列表子部分 / 数值递减）；
+// 循环性的多步遍历一律用 @impure 的逐步推进（见 main.subl），从不依赖深递归。
+
+// ---------- 常量（编译模式顶层只能写声明：常量用零参函数） ----------
+fun BOARD_W(): Nat = 10
+fun BOARD_H(): Nat = 20
+// 四格形状态表（4 字符宽，X=填充，.=空）。七种 I/O/T/S/Z/J/L，各 4 个旋转（CW 序）。
+// 每张表的首行即方块最高格；canPlace/lockPiece 只数 "X" 格。
+
+// ---------- 基础工具（数值/索引递减驱动） ----------
+fun repeatRow(n: Nat): List[List[Str]] =
+    if (n == 0) Nil()
+    else Cons(emptyRow(), repeatRow(n - 1))
+
+fun repeatCell(n: Nat, s: Str): List[Str] =
+    if (n == 0) Nil()
+    else Cons(s, repeatCell(n - 1, s))
+
+// 空棋盘：20 行 × 10 格，格内容 ""。
+fun newBoard(): List[List[Str]] = repeatRow(BOARD_H())
+fun emptyRow(): List[Str] = repeatCell(BOARD_W(), "")
+
+// 按下标取行（越界返回空行）。
+fun rowAt(board: List[List[Str]], r: Int): List[Str] =
+    when (board) {
+        Nil => emptyRow()
+        is Cons(h, t) => if (r == 0) h else rowAt(t, r - 1)
+        else => emptyRow()
+    }
+
+// 按下标取格（越界返回 ""）。
+fun cellInRow(row: List[Str], c: Int): Str =
+    when (row) {
+        Nil => ""
+        is Cons(h, t) => if (c == 0) h else cellInRow(t, c - 1)
+        else => ""
+    }
+
+fun cellAt(board: List[List[Str]], r: Int, c: Int): Str =
+    cellInRow(rowAt(board, r), c)
+
+// 按下标改行/改格（返回新结构；i 从 0 数起、逐层递减）。
+fun rowUpd(row: List[Str], i: Int, v: Str): List[Str] =
+    when (row) {
+        Nil => Nil()
+        is Cons(h, t) => if (i == 0) Cons(v, t) else Cons(h, rowUpd(t, i - 1, v))
+        else => Nil()
+    }
+
+fun boardUpd(board: List[List[Str]], i: Int, v: List[Str]): List[List[Str]] =
+    when (board) {
+        Nil => Nil()
+        is Cons(h, t) => if (i == 0) Cons(v, t) else Cons(h, boardUpd(t, i - 1, v))
+        else => Nil()
+    }
+
+// ---------- 七格形状态表 ----------
+fun shapeI(rot: Nat): List[Str] = when (rot) {
+    0 => listOf("XXXX")
+    1 => listOf("X...", "X...", "X...", "X...")
+    2 => listOf("XXXX")
+    else => listOf("X...", "X...", "X...", "X...")
+}
+
+fun shapeO(_rot: Nat): List[Str] = listOf("XX..", "XX..")
+
+fun shapeT(rot: Nat): List[Str] = when (rot) {
+    0 => listOf("XXX.", ".X..")
+    1 => listOf("..X.", ".XX.", "..X.")
+    2 => listOf(".X..", "XXX.")
+    else => listOf("X...", "XX..", "X...")
+}
+
+fun shapeS(rot: Nat): List[Str] = when (rot) {
+    0 => listOf(".XX.", "XX..")
+    1 => listOf("X...", "XX..", ".X..")
+    2 => listOf(".XX.", "XX..")
+    else => listOf("X...", "XX..", ".X..")
+}
+
+fun shapeZ(rot: Nat): List[Str] = when (rot) {
+    0 => listOf("XX..", ".XX.")
+    1 => listOf(".X..", "XX..", "X...")
+    2 => listOf("XX..", ".XX.")
+    else => listOf(".X..", "XX..", "X...")
+}
+
+fun shapeJ(rot: Nat): List[Str] = when (rot) {
+    0 => listOf("X...", "XXX.")
+    1 => listOf(".XX.", ".X..", ".X..")
+    2 => listOf("XXX.", "..X.")
+    else => listOf("..X.", "..X.", ".XX.")
+}
+
+fun shapeL(rot: Nat): List[Str] = when (rot) {
+    0 => listOf("..X.", "XXX.")
+    1 => listOf(".X..", ".X..", ".XX.")
+    2 => listOf("XXX.", "X...")
+    else => listOf(".X..", ".X..", "XX..")
+}
+
+fun shapeOf(kind: Nat, rot: Nat): List[Str] = when (kind) {
+    0 => shapeI(rot)
+    1 => shapeO(rot)
+    2 => shapeT(rot)
+    3 => shapeS(rot)
+    4 => shapeZ(rot)
+    5 => shapeJ(rot)
+    else => shapeL(rot)
+}
+
+fun nextRot(rot: Nat): Nat = if (rot >= 3) 0 else rot + 1
+
+// 颜色（#rgb 短码）：I 青 / O 黄 / T 紫 / S 绿 / Z 红 / J 蓝 / L 橙。
+fun kindColor(kind: Nat): Str = when (kind) {
+    0 => "#0ff"
+    1 => "#ff0"
+    2 => "#a0f"
+    3 => "#0f0"
+    4 => "#f00"
+    5 => "#00f"
+    else => "#f90"
+}
+
+// ---------- 碰撞 ----------
+// 单格是否可放：框内且为空。
+fun cellOk(board: List[List[Str]], c: Int, r: Int): Bool =
+    if (c < 0) false
+    else if (r < 0) false
+    else if (c >= BOARD_W()) false
+    else if (r >= BOARD_H()) false
+    else cellAt(board, r, c) == ""
+
+// 一行形格（4 字符宽）在 (x, y) 是否全可放；c 递减驱动。
+fun rowFits(board: List[List[Str]], shapeRow: Str, x: Int, y: Int, c: Int): Bool =
+    if (c < 0) true
+    else if (charAt(shapeRow, c) == "X")
+        rowFits(board, shapeRow, x, y, c - 1) && cellOk(board, x + c, y)
+    else rowFits(board, shapeRow, x, y, c - 1)
+
+// 整个形（多行）在 (x, y)（首行对齐）是否可放；r 递增、行表变短。
+fun shapeFits(board: List[List[Str]], shape: List[Str], x: Int, y: Int, r: Int): Bool =
+    when (shape) {
+        Nil => true
+        is Cons(h, t) =>
+            if (rowFits(board, h, x, y + r, 3)) shapeFits(board, t, x, y, r + 1)
+            else false
+        else => true
+    }
+
+fun canPlace(board: List[List[Str]], kind: Nat, rot: Nat, x: Int, y: Int): Bool =
+    shapeFits(board, shapeOf(kind, rot), x, y, 0)
+
+// ---------- 锁定 ----------
+// 把一行形格涂进棋盘行。
+fun paintRow(row: List[Str], shapeRow: Str, x: Int, c: Int, color: Str): List[Str] =
+    if (c < 0) row
+    else if (charAt(shapeRow, c) == "X") paintRow(rowUpd(row, x + c, color), shapeRow, x, c - 1, color)
+    else paintRow(row, shapeRow, x, c - 1, color)
+
+// 把整个形涂进棋盘；行表变短、r 递增。
+fun paintShape(board: List[List[Str]], shape: List[Str], x: Int, y: Int, r: Int, color: Str): List[List[Str]] =
+    when (shape) {
+        Nil => board
+        is Cons(h, t) => paintShape(boardUpd(board, y + r, paintRow(rowAt(board, y + r), h, x, 3, color)), t, x, y, r + 1, color)
+        else => board
+    }
+
+fun lockPiece(board: List[List[Str]], kind: Nat, rot: Nat, x: Int, y: Int, color: Str): List[List[Str]] =
+    paintShape(board, shapeOf(kind, rot), x, y, 0, color)
+
+// ---------- 消行 ----------
+fun rowFull(row: List[Str]): Bool = !contains(row, "")
+
+fun countFullLines(board: List[List[Str]]): Nat = countFullWalk(board, 0)
+
+fun countFullWalk(rows: List[List[Str]], acc: Nat): Nat =
+    when (rows) {
+        Nil => acc
+        is Cons(h, t) => if (rowFull(h)) countFullWalk(t, acc + 1) else countFullWalk(t, acc)
+        else => acc
+    }
+
+fun keepRows(rows: List[List[Str]]): List[List[Str]] =
+    when (rows) {
+        Nil => Nil()
+        is Cons(h, t) => if (rowFull(h)) keepRows(t) else Cons(h, keepRows(t))
+        else => Nil()
+    }
+
+// 消行后补齐顶部空行：重力即「整表下移」。
+fun clearedBoard(board: List[List[Str]]): List[List[Str]] =
+    append(repeatRow(BOARD_H() - size(keepRows(board))), keepRows(board))
+
+// ---------- 计分 / 等级 / 速度 ----------
+// 单/双/三/四行分档（经典 100/300/500/800）。
+fun scoreFor(lines: Nat): Nat = when (lines) {
+    0 => 0
+    1 => 100
+    2 => 300
+    3 => 500
+    else => 800
+}
+
+// 每消 10 行升一级（上限 10 级封顶）。
+fun levelFor(lines: Nat): Nat =
+    if (lines < 10) 1
+    else if (lines < 20) 2
+    else if (lines < 30) 3
+    else if (lines < 40) 4
+    else if (lines < 50) 5
+    else if (lines < 60) 6
+    else if (lines < 70) 7
+    else if (lines < 80) 8
+    else if (lines < 90) 9
+    else 10
+
+// 下落间隔（秒）：每级提速，10 级后封顶 0.08s。
+fun fallInterval(level: Nat): Rat = when (level) {
+    1 => 0.80
+    2 => 0.72
+    3 => 0.63
+    4 => 0.55
+    5 => 0.47
+    6 => 0.38
+    7 => 0.30
+    8 => 0.22
+    9 => 0.13
+    else => 0.08
+}
+
+// ---------- 局终 ----------
+// 新方块在出生位（x=3, y=0）放不下即结局。
+fun isGameOver(board: List[List[Str]], kind: Nat): Bool =
+    !canPlace(board, kind, 0, 3, 0)
+
+// ---------- 渲染用：格坐标清单 ----------
+// 形格的 (col, row) 清单（供渲染 4 个下落格）。
+fun rowCellList(shapeRow: Str, x: Int, y: Int, c: Int): List[(Int, Int)] =
+    if (c < 0) Nil()
+    else if (charAt(shapeRow, c) == "X") Cons((x + c, y), rowCellList(shapeRow, x, y, c - 1))
+    else rowCellList(shapeRow, x, y, c - 1)
+
+fun shapeCells(shape: List[Str], x: Int, y: Int, r: Int): List[(Int, Int)] =
+    when (shape) {
+        Nil => Nil()
+        is Cons(h, t) => append(rowCellList(h, x, y + r, 3), shapeCells(t, x, y, r + 1))
+        else => Nil()
+    }
+
+// 棋盘所有已填格的 (col, row) 清单（供重建锁定格对象）。
+fun boardCells(rows: List[List[Str]], r: Int): List[(Int, Int)] =
+    when (rows) {
+        Nil => Nil()
+        is Cons(h, t) =>
+            append(rowCellsWalk(h, r, 9), boardCells(t, r + 1))
+        else => Nil()
+    }
+
+fun rowCellsWalk(row: List[Str], r: Int, c: Int): List[(Int, Int)] =
+    if (c < 0) Nil()
+    else if (cellInRow(row, c) == "") rowCellsWalk(row, r, c - 1)
+    else Cons((c, r), rowCellsWalk(row, r, c - 1))

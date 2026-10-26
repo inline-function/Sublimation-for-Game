@@ -1,51 +1,440 @@
-// main.subl —— 最小游戏 demo：豆豆躲方块
+// main.subl —— SfG 招牌 demo：俄罗斯方块（Sublimation 写的完整一局）
 //
-// 玩法：左右方向键移动豆豆，躲避天上掉落的红色方块；
-//       被砸中即 Game Over，按空格回到场景重开。
+// 玩法：七种标准方块（I/O/T/S/Z/J/L）落进 10×20 棋盘；
+// ←→ 移动、↑ 旋转（带轻量踢墙）、↓ 软降、空格硬降、P 暂停；
+// 行消除计分（单 100 / 双 300 / 三 500 / 四 800）、每 10 行升一级并提速、
+// next 预览、Game Over 画面 + 空格重开。
 //
-// 覆盖游戏库四条主线（game doc/游戏库.md）：
-//   精灵 spriteLoad / spriteAdd / rectAdd / textAdd
-//   输入 onKeyDown / onKeyPress
-//   循环 onUpdate / every
-//   碰撞 objAddArea / objOnCollide / objDestroy / objTag
+// 分层：纯逻辑（棋盘/碰撞/消行/计分/结局）全部在 tetris-logic.subl，
+// 本文件只做「状态打包 + 事件驱动 + 渲染」，node 侧逻辑断言见 test/tetris-logic-test.js。
+//
+// 语言约束姿势（t46 后）：
+//   - 编译模式顶层只能写声明：常量用零参函数、状态用元组打包；
+//   - 纯函数递归必须带严格变小的参数（见 tetris-logic.subl 的数值/列表递减 walk）；
+//   - 循环性推进一律交给 @impure 顶层函数（不受停期检查约束），由游戏循环 tick 驱动。
 
-// 刷一个敌人：随机 x、红色方块、下落、出屏销毁。
+// ---------- 常量 ----------
+fun CELL(): Rat = 22.0        // 棋盘格像素
+fun BOARD_X(): Rat = 16.0
+fun BOARD_Y(): Rat = 8.0
+fun PREV_X(): Rat = 306.0     // next 预览格像素原点
+fun PREV_Y(): Rat = 56.0
+fun MOVE_REPEAT(): Rat = 0.07 // DAS 重复间隔（秒）
+fun SPAWN_X(): Int = 3
+fun SPAWN_Y(): Int = 0
+
+// ---------- 元组解包助手 ----------
+fun colOf(cell: (Int, Int)): Int = when (cell) {
+            (c, _r) => c
+            else => 0
+        }
+fun rowOf(cell: (Int, Int)): Int = when (cell) {
+            (_c, r) => r
+            else => 0
+        }
+fun cellPxOf(col: Int): Rat = BOARD_X() + (toRat(col) * CELL())
+fun cellPyOf(row: Int): Rat = BOARD_Y() + (toRat(row) * CELL())
+
+// ---------- 静态背景 ----------
 @impure
-fun spawnEnemy(): Null {
-    var x = 40.0 + (rand() * 560.0)
-    var e = rectAdd(28.0, 28.0, x, -30.0, "#ff4444")
-    objAddArea(e)
-    objTag(e, "enemy")
-    onUpdate({ dt => objMove(e, 0.0, 180.0 * dt) })
-    onUpdate({ _dt => if (objTop(e) > 520.0) objDestroy(e) })
+fun drawBgCells(r: Int, c: Int): Null =
+    if (c < 0) null
+    else {
+        var o = rectAdd(CELL() - 2.0, CELL() - 2.0, cellPxOf(c), cellPyOf(r), "#1c1c2e")
+        objTag(o, "bg")
+        drawBgCells(r, c - 1)
+    }
+
+@impure
+fun drawBgRows(r: Int): Null =
+    if (r >= 20) null
+    else { drawBgCells(r, 9); drawBgRows(r + 1) }
+
+@impure
+fun buildBg(): Null {
+    drawBgRows(0)
+    var panel = rectAdd(172.0, 444.0, 256.0, BOARD_Y(), "#14141f")
+    objTag(panel, "bg")
+    var _tNext = textAdd("NEXT", 296.0, 22.0, 18.0)
+    var _tCtl1 = textAdd("←→ 移动", 260.0, 300.0, 13.0)
+    var _tCtl2 = textAdd("↑ 旋转  ↓ 软降", 260.0, 322.0, 13.0)
+    var _tCtl3 = textAdd("空格 硬降", 260.0, 344.0, 13.0)
+    var _tCtl4 = textAdd("P 暂停", 260.0, 366.0, 13.0)
+    null
+}
+
+// ---------- 渲染 ----------
+@impure
+fun renderFallingCells(cells: List[(Int, Int)], color: Str): Null =
+    when (cells) {
+        Nil => null
+        is Cons(cell, rest) => {
+            var o = rectAdd(CELL() - 2.0, CELL() - 2.0, cellPxOf(colOf(cell)) + 1.0, cellPyOf(rowOf(cell)) + 1.0, color)
+            objTag(o, "piece")
+            renderFallingCells(rest, color)
+        }
+        else => null
+    }
+
+@impure
+fun renderFalling(kind: Nat, rot: Nat, px: Int, py: Int): Null {
+    objsDestroyTag("piece")
+    renderFallingCells(shapeCells(shapeOf(kind, rot), px, py, 0), kindColor(kind))
+    null
+}
+
+@impure
+fun renderCellLoop(cells: List[(Int, Int)], board: List[List[Str]]): Null =
+    when (cells) {
+        Nil => null
+        is Cons(cell, rest) => {
+            var o = rectAdd(CELL() - 2.0, CELL() - 2.0, cellPxOf(colOf(cell)) + 1.0, cellPyOf(rowOf(cell)) + 1.0, cellAt(board, rowOf(cell), colOf(cell)))
+            objTag(o, "cell")
+            renderCellLoop(rest, board)
+        }
+        else => null
+    }
+
+@impure
+fun renderCells(board: List[List[Str]]): Null {
+    objsDestroyTag("cell")
+    renderCellLoop(boardCells(board, 0), board)
+    null
+}
+
+@impure
+fun renderNextCells(cells: List[(Int, Int)], color: Str): Null =
+    when (cells) {
+        Nil => null
+        is Cons(cell, rest) => {
+            var o = rectAdd(14.0, 14.0, PREV_X() + (toRat(colOf(cell)) * 16.0), PREV_Y() + (toRat(rowOf(cell)) * 16.0), color)
+            objTag(o, "next")
+            renderNextCells(rest, color)
+        }
+        else => null
+    }
+
+@impure
+fun renderNext(kind: Nat): Null {
+    objsDestroyTag("next")
+    renderNextCells(shapeCells(shapeOf(kind, 0), 0, 0, 0), kindColor(kind))
+    null
+}
+
+@impure
+fun renderHud(score: Nat, lines: Nat, level: Nat, hudScore: Any, hudLines: Any, hudLevel: Any): Null {
+    objTextSet(hudScore, concat("score: ", toStr(score)))
+    objTextSet(hudLines, concat("lines: ", toStr(lines)))
+    objTextSet(hudLevel, concat("level: ", toStr(level)))
+    null
+}
+
+// ---------- 状态打包：(board, kind, rot, px, py, nextKind, score, lines, alive) ----------
+fun repack(board: List[List[Str]], kind: Nat, rot: Nat, px: Int, py: Int, nextKind: Nat, score: Nat, lines: Nat, alive: Bool): (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) = (board, kind, rot, px, py, nextKind, score, lines, alive)
+
+@impure
+fun tryMoveSt(st: (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool), dx: Int): (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) =
+    when (st) {
+        (board, kind, rot, px, py, nextK, sc, ln, alive) =>
+            if (canPlace(board, kind, rot, px + dx, py)) repack(board, kind, rot, px + dx, py, nextK, sc, ln, alive)
+            else st
+        else => st
+    }
+
+@impure
+fun kicks(i: Nat): Int = when (i) {
+            0 => 0
+            1 => -1
+            2 => 1
+            3 => -2;
+            else => 2
+        }
+
+@impure
+fun tryRotSt(st: (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool), i: Nat): (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) =
+    if (i >= 5) st
+    else when (st) {
+        (board, kind, rot, px, py, nextK, sc, ln, alive) =>
+            if (canPlace(board, kind, nextRot(rot), px + kicks(i), py)) repack(board, kind, nextRot(rot), px + kicks(i), py, nextK, sc, ln, alive)
+            else tryRotSt(st, i + 1)
+        else => st
+    }
+
+@impure
+fun lockAndSpawn(st: (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool)): (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) =
+    when (st) {
+        (board, kind, rot, px, py, nextK, sc, ln, alive) => {
+            var board1 = lockPiece(board, kind, rot, px, py, kindColor(kind))
+            var cleared = countFullLines(board1)
+            var board2 = if (cleared > 0) clearedBoard(board1) else board1
+            var sc2 = sc + scoreFor(cleared)
+            var ln2 = ln + cleared
+            var kind2 = nextK
+            var nextK2 = randNat(7)
+            var alive2 = canPlace(board2, kind2, 0, SPAWN_X(), SPAWN_Y())
+            repack(board2, kind2, 0, SPAWN_X(), SPAWN_Y(), nextK2, sc2, ln2, alive2)
+        }
+        else => st
+    }
+
+@impure
+fun tickSt(st: (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool)): (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) =
+    when (st) {
+        (board, kind, rot, px, py, nextK, sc, ln, alive) =>
+            if (canPlace(board, kind, rot, px, py + 1)) repack(board, kind, rot, px, py + 1, nextK, sc, ln, alive)
+            else lockAndSpawn(st)
+        else => st
+    }
+
+@impure
+fun hardDropSt(st: (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool)): (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) =
+    when (st) {
+        (board, kind, rot, px, py, nextK, sc, ln, alive) =>
+            if (canPlace(board, kind, rot, px, py + 1)) hardDropSt(repack(board, kind, rot, px, py + 1, nextK, sc, ln, alive))
+            else lockAndSpawn(st)
+        else => st
+    }
+
+@impure
+fun showOver(score: Nat, lines: Nat): Null {
+    var _t1 = textAdd("GAME OVER", 130.0, 150.0, 38.0)
+    var _t2 = textAdd(concat("score: ", toStr(score)), 160.0, 220.0, 22.0)
+    var _t3 = textAdd(concat("lines: ", toStr(lines)), 160.0, 252.0, 22.0)
+    var _t4 = textAdd("按空格重新开始", 148.0, 306.0, 18.0)
+    onKeyPress("space") { _e => sceneGo("main") }
+    null
+}
+
+// ---------- 一局 ----------
+@impure
+fun runGame(): Null {
+    buildBg()
+    var hudScore = textAdd("score: 0", 260.0, 160.0, 16.0)
+    var hudLines = textAdd("lines: 0", 260.0, 190.0, 16.0)
+    var hudLevel = textAdd("level: 1", 260.0, 220.0, 16.0)
+
+    var b0: List[List[Str]] = newBoard()
+    @mut var st: (List[List[Str]], Nat, Nat, Int, Int, Nat, Nat, Nat, Bool) = (b0, randNat(7), 0, SPAWN_X(), SPAWN_Y(), randNat(7), 0, 0, true)
+    @mut var gLevel: Nat = 1
+    @mut var fallTimer: Rat = 0.0
+    @mut var moveTimer: Rat = 0.0
+    @mut var leftHeld: Bool = false
+    @mut var rightHeld: Bool = false
+    @mut var downHeld: Bool = false
+    @mut var paused: Bool = false
+    @mut var aliveNow: Bool = true
+    @mut var pauseText: Optional[Any] = None()
+
+    sceneAdd("gameover") { _e =>
+        var scF = when (st) {
+            (_board, _kind, _rot, _px, _py, _nextK, sc, _ln, _alive) => sc
+            else => 0
+        }
+        var lnF = when (st) {
+            (_board, _kind, _rot, _px, _py, _nextK, _sc, ln, _alive) => ln
+            else => 0
+        }
+        showOver(scF, lnF)
+    }
+
+    var k0 = when (st) {
+            (_board, kind, _rot, _px, _py, _nextK, _sc, _ln, _alive) => kind
+            else => 0
+        }
+    renderFalling(k0, 0, SPAWN_X(), SPAWN_Y())
+    var nk0 = when (st) {
+            (_board, _kind, _rot, _px, _py, nextK, _sc, _ln, _alive) => nextK
+            else => 0
+        }
+    renderNext(nk0)
+
+    onKeyDown("left") { _e => leftHeld = true }
+    onKeyDown("left") { _e => moveTimer = MOVE_REPEAT() }
+    onKeyRelease("left") { _e => leftHeld = false }
+    onKeyDown("right") { _e => rightHeld = true }
+    onKeyDown("right") { _e => moveTimer = MOVE_REPEAT() }
+    onKeyRelease("right") { _e => rightHeld = false }
+    onKeyDown("down") { _e => downHeld = true }
+    onKeyRelease("down") { _e => downHeld = false }
+
+    onKeyPress("up") { _e =>
+        if (aliveNow && !paused) {
+            st = tryRotSt(st, 0)
+            var kind2 = when (st) {
+            (_board, k, _rot, _px, _py, _nextK, _sc, _ln, _alive) => k
+            else => 0
+        }
+            var rot2 = when (st) {
+            (_board, _k, rot, _px, _py, _nextK, _sc, _ln, _alive) => rot
+            else => 0
+        }
+            var px2 = when (st) {
+            (_board, _k, _rot, px, _py, _nextK, _sc, _ln, _alive) => px
+            else => 0
+        }
+            var py2 = when (st) {
+            (_board, _k, _rot, _px, py, _nextK, _sc, _ln, _alive) => py
+            else => 0
+        }
+            renderFalling(kind2, rot2, px2, py2)
+        }
+    }
+
+    onKeyPress("space") { _e =>
+        if (aliveNow && !paused) {
+            st = hardDropSt(st)
+            // 锁定后重建：锁定格 / 新方块 / next / HUD / 结局判定
+            var board2 = when (st) {
+            (board, _k, _rot, _px, _py, _nextK, _sc, _ln, _alive) => board
+            else => b0
+        }
+            var kind2 = when (st) {
+            (_board, k, _rot, _px, _py, _nextK, _sc, _ln, _alive) => k
+            else => 0
+        }
+            var rot2 = when (st) {
+            (_board, _k, rot, _px, _py, _nextK, _sc, _ln, _alive) => rot
+            else => 0
+        }
+            var px2 = when (st) {
+            (_board, _k, _rot, px, _py, _nextK, _sc, _ln, _alive) => px
+            else => 0
+        }
+            var py2 = when (st) {
+            (_board, _k, _rot, _px, py, _nextK, _sc, _ln, _alive) => py
+            else => 0
+        }
+            var nextK2 = when (st) {
+            (_board, _k, _rot, _px, _py, nextK, _sc, _ln, _alive) => nextK
+            else => 0
+        }
+            var sc2 = when (st) {
+            (_board, _k, _rot, _px, _py, _nextK, sc, _ln, _alive) => sc
+            else => 0
+        }
+            var ln2 = when (st) {
+            (_board, _k, _rot, _px, _py, _nextK, _sc, ln, _alive) => ln
+            else => 0
+        }
+            var alive2 = when (st) {
+            (_board, _k, _rot, _px, _py, _nextK, _sc, _ln, alive) => alive
+            else => true
+        }
+            renderCells(board2)
+            renderFalling(kind2, rot2, px2, py2)
+            renderNext(nextK2)
+            gLevel = levelFor(ln2)
+            renderHud(sc2, ln2, gLevel, hudScore, hudLines, hudLevel)
+            if (aliveNow && !alive2) {
+                aliveNow = false
+                sceneGo("gameover")
+            }
+        }
+    }
+
+    onKeyPress("p") { _e =>
+        if (aliveNow) {
+            paused = !paused
+            if (paused) { pauseText = Some(textAdd("— 暂停 —  P 继续", 96.0, 220.0, 24.0)) }
+            else {
+                when (pauseText) {
+            is Some(o) => objDestroy(o)
+            None => null;
+            else => null
+        }
+                pauseText = None()
+            }
+        }
+    }
+
+    onUpdate({ dt =>
+        if (aliveNow && !paused) {
+            // DAS：按住方向键按 MOVE_REPEAT 重复移动
+            if (leftHeld) {
+                moveTimer = moveTimer + dt
+                if (moveTimer >= MOVE_REPEAT()) {
+                    moveTimer = 0.0
+                    st = tryMoveSt(st, -1)
+                    var mk = when (st) { (_b, k, _r2, _x, _y, _n, _s, _l, _a) => k; else => 0 }
+                    var mr = when (st) { (_b, _k, r2, _x, _y, _n, _s, _l, _a) => r2; else => 0 }
+                    var mx = when (st) { (_b, _k, _r2, x, _y, _n, _s, _l, _a) => x; else => 0 }
+                    var my = when (st) { (_b, _k, _r2, _x, y, _n, _s, _l, _a) => y; else => 0 }
+                    renderFalling(mk, mr, mx, my)
+                }
+            } else if (rightHeld) {
+                moveTimer = moveTimer + dt
+                if (moveTimer >= MOVE_REPEAT()) {
+                    moveTimer = 0.0
+                    st = tryMoveSt(st, 1)
+                    var mk = when (st) { (_b, k, _r2, _x, _y, _n, _s, _l, _a) => k; else => 0 }
+                    var mr = when (st) { (_b, _k, r2, _x, _y, _n, _s, _l, _a) => r2; else => 0 }
+                    var mx = when (st) { (_b, _k, _r2, x, _y, _n, _s, _l, _a) => x; else => 0 }
+                    var my = when (st) { (_b, _k, _r2, _x, y, _n, _s, _l, _a) => y; else => 0 }
+                    renderFalling(mk, mr, mx, my)
+                }
+            } else { moveTimer = 0.0 }
+            // 重力：tick 驱动（软降 ×1/15 间隔），落地即锁定/消行/判结局
+            @mut var interval: Rat = fallInterval(gLevel)
+            if (downHeld) { interval = interval * 0.15 }
+            fallTimer = fallTimer + dt
+            if (fallTimer >= interval) {
+                fallTimer = 0.0
+                st = tickSt(st)
+                var board2 = when (st) {
+            (board, _k, _rot, _px, _py, _nextK, _sc, _ln, _alive) => board
+            else => b0
+        }
+                var kind2 = when (st) {
+            (_board, k, _rot, _px, _py, _nextK, _sc, _ln, _alive) => k
+            else => 0
+        }
+                var rot2 = when (st) {
+            (_board, _k, rot, _px, _py, _nextK, _sc, _ln, _alive) => rot
+            else => 0
+        }
+                var px2 = when (st) {
+            (_board, _k, _rot, px, _py, _nextK, _sc, _ln, _alive) => px
+            else => 0
+        }
+                var py2 = when (st) {
+            (_board, _k, _rot, _px, py, _nextK, _sc, _ln, _alive) => py
+            else => 0
+        }
+                var nextK2 = when (st) {
+            (_board, _k, _rot, _px, _py, nextK, _sc, _ln, _alive) => nextK
+            else => 0
+        }
+                var sc2 = when (st) {
+            (_board, _k, _rot, _px, _py, _nextK, sc, _ln, _alive) => sc
+            else => 0
+        }
+                var ln2 = when (st) {
+            (_board, _k, _rot, _px, _py, _nextK, _sc, ln, _alive) => ln
+            else => 0
+        }
+                var alive2 = when (st) {
+            (_board, _k, _rot, _px, _py, _nextK, _sc, _ln, alive) => alive
+            else => true
+        }
+                renderCells(board2)
+                renderFalling(kind2, rot2, px2, py2)
+                renderNext(nextK2)
+                gLevel = levelFor(ln2)
+                renderHud(sc2, ln2, gLevel, hudScore, hudLines, hudLevel)
+                if (aliveNow && !alive2) {
+                    aliveNow = false
+                    sceneGo("gameover")
+                }
+            }
+        }
+    })
     null
 }
 
 @impure
 fun main(): Null {
-    gameStart(640, 480)
-    spriteLoad("bean", "assets/bean.png")
-
-    @mut var score: Int = 0
-
-    var player = spriteAdd("bean", 300.0, 400.0)
-    objAddArea(player)
-    var label = textAdd("score: 0", 16.0, 16.0, 24.0)
-
-    // 输入：左右移动
-    onKeyDown("left") { _e => objMove(player, -6.0, 0.0) }
-    onKeyDown("right") { _e => objMove(player, 6.0, 0.0) }
-
-    // 循环：每秒计分 + 刷怪；每帧刷新分数文字
-    every(1.0) { _e => score = score + 1 }
-    every(1.0) { _e => spawnEnemy() }
-    onUpdate({ _dt => objTextSet(label, concat("score: ", toStr(score))) })
-
-    // 碰撞：玩家撞上敌人 → 游戏结束
-    objOnCollide(player, "enemy") { _o =>
-        objDestroy(player)
-        textAdd("Game Over  按空格重开", 120.0, 220.0, 32.0)
-        onKeyPress("space") { _e => sceneGo("main") }
-    }
+    gameStart(440, 480)
+    sceneAdd("main") { _e => runGame() }
+    sceneGo("main")
     null
 }
