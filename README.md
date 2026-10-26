@@ -33,11 +33,7 @@ Sublimation 语言（声明式、受 Rust/Kotlin 启发的设计验证语言）�
 
     cd F:\SublimationProject\sublimation for game
     # 主仓 fat jar（release/sublimation.jar）
-    # -Xss8m：处理器解释器对函数列表遍历是 O(N) 深度，本机默认 1m 栈在 N≈300
-    #         （core 副本 + 游戏库声明）起溢出（t40 实测；t44 修 ScriptFrame 父链
-    #         自递归后栈需求从 32m 降到 8m）；编译器线处理 Evaluator 递归深度
-    #         （或加 TCO）后可去掉本旗标
-    java -Xss8m -jar F:\KotlinProject\Sublimation\release\sublimation.jar compile app ^
+    java -jar F:\KotlinProject\Sublimation\release\sublimation.jar compile app ^
         -o game-app\build\app.js --target=browser ^
         -A gameApp=game-app -A gameJs=game-app\build\app.js
     node test\smoke-test.js            # 冒烟回归（23 项）
