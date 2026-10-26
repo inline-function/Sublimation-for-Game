@@ -46,8 +46,10 @@ const stubApp = `
     globalThis.__sgResults = { width: w, height: h, comp: JSON.stringify(s.call("compSprite", ["bean"])), opsN: s.ops().length };
     var cb = function () { globalThis.__sgCbFired = true; };
     s.call("onKeyPress", ["space", cb]);
-    // 裸名别名（过渡兼容）：与宿主运行时同作用域内解析（浏览器 <script> 全局的 Node 等价）
-    try { gameGravity(2.0); sceneGo("aliasscene"); globalThis.__sgAlias = "ok"; } catch (e) { globalThis.__sgAlias = String(e); }
+    // @host 通道走单入口（t43 后生成器只出 __subl.call；裸名已回撤）
+    try { s.call("gameGravity", [2.0]); s.call("sceneGo", ["aliasscene"]); globalThis.__sgAlias = "ok"; } catch (e) { globalThis.__sgAlias = String(e); }
+    // 裸名不再以全局可见（闭包封装）：typeof 对未声明标识符安全
+    globalThis.__sgBareGone = (typeof gameGravity === "undefined" && typeof sceneGo === "undefined");
 }) ();
 `;
 
@@ -70,11 +72,12 @@ try { globalThis.__subl.call("nopeOp", [1]); } catch (e) { unknownErr = String(e
 ok("未知 op 抛出错误", !!unknownErr, unknownErr);
 ok("错误信息标注 op 名与 op 表", unknownErr.indexOf("nopeOp") >= 0 && unknownErr.indexOf("op") >= 0, unknownErr);
 
-// 过渡兼容：裸名别名仍可用（同一注册表派生，待 t37 落定后移除）
-ok("裸名别名过渡期仍可用（-A 路线产物不破）", globalThis.__sgAlias === "ok" && kaplayCalls.some((c) => c.fn === "setGravity" && c.g === 2.0), globalThis.__sgAlias);
-ok("别名 sceneGo 分派到 KAPLAY", kaplayCalls.some((c) => c.fn === "go" && c.name === "aliasscene"), "");
+// @host 通道（t43 后经单入口；与 __SG_OPS 注册表同源）：
+ok("__subl.call(gameGravity) 分派到 KAPLAY", globalThis.__sgAlias === "ok" && kaplayCalls.some((c) => c.fn === "setGravity" && c.g === 2.0), globalThis.__sgAlias);
+ok("__subl.call(sceneGo) 分派到 KAPLAY", kaplayCalls.some((c) => c.fn === "go" && c.name === "aliasscene"), "");
+ok("裸名桥全局已回撤（闭包封装，不再污染页面全局）", globalThis.__sgBareGone === true, String(globalThis.__sgBareGone));
 
 console.log(fails === 0
-    ? "DISPATCH-ABI-TEST: ALL PASSED (" + checks + " 项：__subl.call 单入口 + 兼容别名 + 错误契约)"
+    ? "DISPATCH-ABI-TEST: ALL PASSED (" + checks + " 项：__subl.call 单入口 + S-1 装载 + 裸名回撤 + 错误契约)"
     : "DISPATCH-ABI-TEST: " + fails + " FAILED");
 process.exitCode = fails === 0 ? 0 : 1;

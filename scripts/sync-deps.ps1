@@ -58,7 +58,14 @@ function Sync-Tree($src, $dst) {
 
 if (-not $SkipCore) {
     Sync-Tree (Join-Path $main "core") (Join-Path $repoRoot "core")
-    Sync-Tree (Join-Path $main "core") (Join-Path $repoRoot "app\core")
+    # browser 目标（--target=browser）下 core/net 不可用（Target.kt 的
+# Platform.MODULE_AVAILABILITY），app 副本不挂载 net；仓根 ./core（处理器
+# 脚本 stdlib）按主仓原样保留。
+Sync-Tree (Join-Path $main "core") (Join-Path $repoRoot "app\core")
+foreach ($m in @("net")) {
+    $p = Join-Path $repoRoot ("app\core\" + $m)
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Output "app/core/$m pruned (browser target unavailable)" }
+}
 }
 
 Write-Host "[sync-deps] 完成"

@@ -10,9 +10,18 @@
   </style>
 </head>
 <body>
-  <!-- 载入顺序：KAPLAY → 桥运行时（ @host 实现）→ Sublimation 编译产物（main 自执行） -->
+  <!-- 载入顺序：KAPLAY → 桥运行时（op 注册表 + __subl.call 分派 + @host 实现）→
+       Sublimation 编译产物（--target=browser 的 S-1 形态，main 不自执行） -->
   <script src="vendor/kaplay.js"></script>
   <script src="js/game-runtime.js"></script>
   <script src="app.js"></script>
+  <script>
+    // S-1 装载模型：宿主在脚本装载完成后调用导出的 main（宿主规范 §1 步 5）。
+    // main 为 async；这里启动即可，KAPLAY 的帧/事件循环驱动后续调度。
+    globalThis.__subl.main().catch(function (e) {
+      document.body.insertAdjacentHTML("beforeend",
+        "<pre style=\"color:#f88;padding:8px\">[SfG] main 运行失败：" + String(e) + "</pre>");
+    });
+  </script>
 </body>
 </html>

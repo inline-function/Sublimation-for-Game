@@ -4,8 +4,9 @@
 //
 // 【宿主桥 ABI（t38 定案）】唯一入口 globalThis.__subl.call(op, args)：
 //   op = 操作名（= @game @host 声明的函数名），args = Sublimation 实参数组。
-//   宿主侧用 __SG_OPS 注册表（单一真源）实现各 op；上面的具名函数既是实现，
-//   也作为过渡期裸名别名保留（-A 路线/预 t37 编译器产物以裸名调用；t37 落定后移除）。
+//   宿主侧用 __SG_OPS 注册表（单一真源）实现各 op。
+//   编译器（t43 落定）对用户 @host 无体声明也统一生成 __subl.call ——
+//   本文件整体包在闭包里，不向页面暴露任何桥全局名（t40 时期的裸名通道已回撤）。
 //   op 表与 game.subs 处理器白名单一一对应（笔误编译期报错）。
 //
 // 约定：
@@ -16,7 +17,9 @@
 // 载入顺序（index.html）：
 //   <script src="vendor/kaplay.js"></script>   ← 定义全局 kaplay()
 //   <script src="js/game-runtime.js"></script> ← 本文件
-//   <script src="app.js"></script>             ← Sublimation 编译产物，main() 自执行
+//   <script src="app.js"></script>             ← Sublimation 产物（S-1：导出 __subl.main，
+//                                                 由 index.html 的末段 script 调用）
+(function () {
 "use strict";
 
 var __sgCtx = null;
@@ -150,7 +153,7 @@ var __SG_OPS = {
     objsByTag: objsByTag, objsDestroyTag: objsDestroyTag,
 };
 
-// 安装 __subl.call（不覆盖宿主/产物可能已有的 __sublmain 等字段）
+// 安装 __subl.call（不覆盖宿主/产物可能已有的 __subl.main 等字段）
 globalThis.__subl = globalThis.__subl || {};
 globalThis.__subl.call = function (op, args) {
     var impl = __SG_OPS[op];
@@ -161,3 +164,4 @@ globalThis.__subl.call = function (op, args) {
 };
 // 列出全部 op（供测试/插件框架枚举能力用）
 globalThis.__subl.ops = function () { return Object.keys(__SG_OPS); };
+})();

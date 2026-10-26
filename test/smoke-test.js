@@ -1,5 +1,6 @@
 // smoke-test.js —— SfG 冒烟测试（Node，无浏览器）
 // 把 KAPLAY 桩 + 壳工程桥（game-runtime.js）+ 编译产物（app.js）放进同一作用域跑一遍，
+// 产物为 --target=browser 的 S-1 形态（main 不自执行），装载后由宿主调 __subl.main()。
 // 断言「豆豆躲方块」演示的核心交互全部成立。用法：node test/smoke-test.js
 "use strict";
 const fs = require("fs");
@@ -78,7 +79,14 @@ globalThis.kaplay = function (opts) {
 // ---- 装载被测代码 ----
 const rt = fs.readFileSync(path.join(gameDir, "js", "game-runtime.js"), "utf8");
 const app = fs.readFileSync(path.join(gameDir, "app.js"), "utf8");
+// 装载（__subl 安装于 globalThis；app 把导出 main 合并进同一对象）
 new Function(rt + "\n" + app)();
+// S-1 装载模型：宿主在脚本装载完成后调用导出的 main
+if (!globalThis.__subl || typeof globalThis.__subl.main !== "function") {
+    console.log("  FAIL 装载：产物未导出 __subl.main（S-1 形态期望）");
+    process.exit(1);
+}
+globalThis.__subl.main();
 
 // ---- 断言 ----
 let fails = 0;
