@@ -1,0 +1,80 @@
+// dispatch-abi-test.js —— 宿主桥 ABI 统一验证（t38）：globalThis.__subl.call(op, args) 单入口
+//
+// 编译器侧 t37 尚未落定（安装版 cli 仍出 -A 裸名产物），此处按任务要求改用
+// **注入 __subl.call 的桩**：合成一个「t37 后产物」——只经 __subl.call 调桥，
+// 在 KAPLAY 桩 + game-runtime.js 的同一作用域内执行，验证单入口 ABI 端到端可用
+// （op 分派、返回值、回调参数存活、未知 op 报错、裸名兼容别名）。
+//
+// 用法：node test/dispatch-abi-test.js
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const runtimeJs = fs.readFileSync(path.join(__dirname, "..", "game-app", "js", "game-runtime.js"), "utf8");
+
+let fails = 0, checks = 0;
+function ok(name, cond, extra) {
+    checks++;
+    if (cond) console.log("  PASS " + name);
+    else { fails++; console.log("  FAIL " + name + (extra ? " :: " + extra : "")); }
+}
+
+// ---- KAPLAY 桩（记录调用，最小可执行语义）----
+var kaplayCalls = [];
+globalThis.kaplay = function (opts) {
+    kaplayCalls.push({ fn: "kaplay", opts: opts });
+    return {
+        width: function () { return (opts && opts.width) || 640; },
+        height: function () { return (opts && opts.height) || 480; },
+        setGravity: function (g) { kaplayCalls.push({ fn: "setGravity", g: g }); },
+        loadSprite: function (n, s) { kaplayCalls.push({ fn: "loadSprite", name: n, src: s }); },
+        sprite: function (n) { return { comp: "sprite", name: n }; },
+        pos: function (x, y) { return { comp: "pos", x: x, y: y }; },
+        onKeyPress: function (k, f) { kaplayCalls.push({ fn: "onKeyPress", key: k }); },
+        go: function (n) { kaplayCalls.push({ fn: "go", name: n }); },
+    };
+};
+
+// ---- 桩产物：t37 后浏览器产物形态（只经 __subl.call 调桥）----
+const stubApp = `
+(function () {
+    var s = globalThis.__subl;
+    s.call("gameStart", [800, 600]);
+    s.call("gameGravity", [9.8]);
+    s.call("spriteLoad", ["bean", "assets/bean.png"]);
+    var w = s.call("viewWidth", []);
+    var h = s.call("viewHeight", []);
+    globalThis.__sgResults = { width: w, height: h, comp: JSON.stringify(s.call("compSprite", ["bean"])), opsN: s.ops().length };
+    var cb = function () { globalThis.__sgCbFired = true; };
+    s.call("onKeyPress", ["space", cb]);
+    // 裸名别名（过渡兼容）：与宿主运行时同作用域内解析（浏览器 <script> 全局的 Node 等价）
+    try { gameGravity(2.0); sceneGo("aliasscene"); globalThis.__sgAlias = "ok"; } catch (e) { globalThis.__sgAlias = String(e); }
+}) ();
+`;
+
+// 装载：宿主运行时 + 桩产物（同一作用域——与 index.html 的 script 顺序同构）
+new Function(runtimeJs + "\n" + stubApp)();
+
+const init = kaplayCalls.find((c) => c.fn === "kaplay");
+ok("__subl.call(gameStart) 分派到 KAPLAY（800x600, global=false）", init && init.opts.width === 800 && init.opts.height === 600 && init.opts.global === false, JSON.stringify(init && init.opts));
+ok("__subl.call(gameGravity) 到达 KAPLAY", kaplayCalls.some((c) => c.fn === "setGravity" && c.g === 9.8), "");
+ok("__subl.call(spriteLoad) 到达 KAPLAY", kaplayCalls.some((c) => c.fn === "loadSprite" && c.name === "bean"), "");
+ok("返回值：viewWidth=800", globalThis.__sgResults.width === 800, JSON.stringify(globalThis.__sgResults));
+ok("返回值：viewHeight=600", globalThis.__sgResults.height === 600, "");
+ok("返回值：compSprite 组件原样回传", globalThis.__sgResults.comp === '{"comp":"sprite","name":"bean"}', globalThis.__sgResults.comp);
+ok("回调实参（lambda）经桥存活", kaplayCalls.some((c) => c.fn === "onKeyPress" && c.key === "space"), "");
+ok("ops() 枚举 45 个 op（与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 45, String(globalThis.__sgResults.opsN));
+
+// 未知 op 必须抛明确错误
+var unknownErr = null;
+try { globalThis.__subl.call("nopeOp", [1]); } catch (e) { unknownErr = String(e); }
+ok("未知 op 抛出错误", !!unknownErr, unknownErr);
+ok("错误信息标注 op 名与 op 表", unknownErr.indexOf("nopeOp") >= 0 && unknownErr.indexOf("op") >= 0, unknownErr);
+
+// 过渡兼容：裸名别名仍可用（同一注册表派生，待 t37 落定后移除）
+ok("裸名别名过渡期仍可用（-A 路线产物不破）", globalThis.__sgAlias === "ok" && kaplayCalls.some((c) => c.fn === "setGravity" && c.g === 2.0), globalThis.__sgAlias);
+ok("别名 sceneGo 分派到 KAPLAY", kaplayCalls.some((c) => c.fn === "go" && c.name === "aliasscene"), "");
+
+console.log(fails === 0
+    ? "DISPATCH-ABI-TEST: ALL PASSED (" + checks + " 项：__subl.call 单入口 + 兼容别名 + 错误契约)"
+    : "DISPATCH-ABI-TEST: " + fails + " FAILED");
+process.exitCode = fails === 0 ? 0 : 1;

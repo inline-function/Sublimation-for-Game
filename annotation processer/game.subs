@@ -2,7 +2,9 @@
 //
 // 职责：
 //   1. @game 标注游戏内建：@host 无体声明，函数体由壳工程 game-app/js/game-runtime.js
-//      用 KAPLAY 实现（产物 app.js 以裸名调用同名全局函数）。
+//      用 KAPLAY 实现。宿主桥 ABI（t38 定案）：唯一入口
+//      globalThis.__subl.call(op, args)，op 名 = @game 声明的函数名
+//      （宿主 __SG_OPS 注册表与这里的 op 表一一对应）。
 //   2. 态度校验：白名单（防笔误：未实现的名字编译期报错而非运行期崩溃）、
 //      @host（无体合法性）、@impure（桥接有副作用）、无体。
 //   3. 编译后阶段（@postcompile build）：把 JS 产物与壳工程资源组装成
@@ -19,16 +21,16 @@ fun checkFuns(xs: List[Str]): Null =
 fun checkOne(fn: Str): Null {
     if (!funHasAnnotation(fn, "game")) null else {
         var anns: List[Str] = funAnnotations(fn);
-        checkWhitelist(fn);
+        checkOp(fn);
         checkHost(fn);
         checkImpure(fn, anns);
         checkNoBody(fn)
     }
 }
 
-fun checkWhitelist(fn: Str): Null {
-    if (isGameBuiltin(fn)) null
-    else processorError("@game 函数 " + fn + " 不在游戏桥白名单内。白名单见 game doc/游戏库.md：gameStart/gameGravity/sceneAdd/sceneGo/viewWidth/viewHeight/spriteLoad/comp*(13 个)/obj*(14 个)/vecX/vecY/输入 6 个/循环 4 个/碰撞 4 个")
+fun checkOp(fn: Str): Null {
+    if (isGameOp(fn)) null
+    else processorError("@game 函数 " + fn + " 不在游戏桥 op 表内（op 名=声明的函数名）。op 表见 game doc/游戏库.md：gameStart/gameGravity/sceneAdd/sceneGo/viewWidth/viewHeight/spriteLoad/comp*(13 个)/obj*(14 个)/vecX/vecY/输入 6 个/循环 4 个/碰撞 4 个")
 }
 
 fun checkHost(fn: Str): Null {
@@ -53,9 +55,9 @@ fun containsAnno(xs: List[Str], a: Str): Bool =
         else => false
     }
 
-fun isGameBuiltin(fn: Str): Bool =
+fun isGameOp(fn: Str): Bool =
     when (fn) {
-        // 引擎与场景（game.subl）
+        // 引擎与场景（op 名=声明函数名；宿主 __SG_OPS 一一对应）
         "gameStart" => true
         "gameGravity" => true
         "sceneAdd" => true

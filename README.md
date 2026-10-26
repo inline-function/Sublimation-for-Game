@@ -37,7 +37,7 @@ Sublimation 语言（声明式、受 Rust/Kotlin 启发的设计验证语言）�
     node testsmoke-test.js
 
 1. **语义检查 + JS 生成**：@game 无体桥接声明经 game.subs 校验后，
-   调用点翻成裸名全局 JS 调用（onKeyDown(...) → JS onKeyDown(...)）。
+   调用点翻成宿主桥单入口 `globalThis.__subl.call(op, args)`（onKeyDown(...) → `__subl.call("onKeyDown", [...])`；op 名 = 声明的函数名，宿主 __SG_OPS 注册表与 game.subs op 白名单一一对应）。
 2. **编译后阶段**（@postcompile build）：把 app.js 与壳工程资源组装成
    game-app/build/game/（index.html + app.js + js/game-runtime.js + vendor/kaplay.js + assets/）。
 3. **运行**：build/game/ 起一个静态服务器（python -m http.server 8080），
@@ -50,7 +50,7 @@ Sublimation 语言（声明式、受 Rust/Kotlin 启发的设计验证语言）�
 
 - **零编译器改动**：游戏能力全部是 @game @host @impure 无体声明（45 个），
   函数体在壳工程 game-runtime.js 里用 KAPLAY 实现；编译器的 @host 无体机制
-  把调用点翻成裸名 JS 调用，与 SfA 的 __dshAndroid 桥同构但更直接（无需桥分发函数）。
+  把调用点翻成宿主桥单入口分派（`globalThis.__subl.call`），与 SfA 的 __dshAndroid 桥、SfW 的 `__subl.call` 桥同构（统一拦截点，供插件框架/白名单/能力门控用）。
 - **桥的纪律靠处理器**：game.subs 白名单在编译期拦截笔误的桥接名；@host 无体、
   @impure 副作用标注由处理器强制/提醒。
 - **KAPLAY 封装**：选它的浏览器全局构建（global: false 初始化），桥接按主题分层：

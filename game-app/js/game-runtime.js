@@ -1,14 +1,17 @@
 // game-runtime.js —— Sublimation for Game 桥运行时
 //
 // 把 app/*.subl 里 @game @host 声明的游戏内建函数一一实现到 KAPLAY（v3001）。
-// 编译产物 app.js 是一个自执行 IIFE，内部以**裸名**调用 these 全局函数
-// （Sublimation 的 @host 无体声明 → codegen 直出同名调用，不生成定义）。
+//
+// 【宿主桥 ABI（t38 定案）】唯一入口 globalThis.__subl.call(op, args)：
+//   op = 操作名（= @game @host 声明的函数名），args = Sublimation 实参数组。
+//   宿主侧用 __SG_OPS 注册表（单一真源）实现各 op；上面的具名函数既是实现，
+//   也作为过渡期裸名别名保留（-A 路线/预 t37 编译器产物以裸名调用；t37 落定后移除）。
+//   op 表与 game.subs 处理器白名单一一对应（笔误编译期报错）。
 //
 // 约定：
 //   - 值层映射：Sublimation Num/Rat → JS number；Str → string；Any → 不透明句柄
 //     （游戏对象 / 组件 / 向量都是 Any，只能经本层函数读写）；
-//   - List[Any] → JS 数组（objsByTag 返回 KAPLAY 数组，二者同构）；
-//   - 每个全局函数名必须与 game.subs 处理器的白名单一一对应（笔误编译期报错）。
+//   - List[Any] → JS 数组（objsByTag 返回 KAPLAY 数组，二者同构）。
 //
 // 载入顺序（index.html）：
 //   <script src="vendor/kaplay.js"></script>   ← 定义全局 kaplay()
@@ -114,3 +117,47 @@ function objOnCollide(o, tag, body) { o.onCollide(tag, function (other) { return
 function objIsColliding(a, b) { return a.isColliding(b); }
 function objsByTag(t) { return __sgK().get(t); }
 function objsDestroyTag(t) { __sgK().destroyAll(t); }
+
+// ============================================================================
+// 宿主桥单入口（t38 定案 ABI）：globalThis.__subl.call(op, args)
+// ============================================================================
+// 注册表 __SG_OPS 是宿主桥的单一真源：op 名 → 上方具名实现。
+// op 表与 game.subs 处理器白名单（isGameOp）一一对应——两边漂移即笔误，
+// 编译期由处理器拒绝，运行期由 dispatcher 抛「未知 op」。
+var __SG_OPS = {
+    // 引擎与场景（game.subl）
+    gameStart: gameStart, gameGravity: gameGravity,
+    sceneAdd: sceneAdd, sceneGo: sceneGo, viewWidth: viewWidth, viewHeight: viewHeight,
+    // 资源（sprite.subl）
+    spriteLoad: spriteLoad,
+    // 组件（comp*.subl）
+    compSprite: compSprite, compPos: compPos, compScale: compScale, compRect: compRect,
+    compCircle: compCircle, compText: compText, compColorHex: compColorHex, compArea: compArea,
+    compBody: compBody, compSolid: compSolid, compTag: compTag, compAnchor: compAnchor,
+    // 对象（obj*.subl）
+    objAdd: objAdd, objUse: objUse, objDestroy: objDestroy, objExists: objExists,
+    objMove: objMove, objSetPos: objSetPos, objSetScale: objSetScale, objPos: objPos,
+    objTextSet: objTextSet, objTag: objTag,
+    // 向量（vector.subl）
+    vecX: vecX, vecY: vecY,
+    // 输入（input.subl）
+    onKeyDown: onKeyDown, onKeyPress: onKeyPress, onKeyRelease: onKeyRelease,
+    onMouseDown: onMouseDown, mousePosX: mousePosX, mousePosY: mousePosY,
+    // 循环与计时（loop.subl）
+    onUpdate: onUpdate, frameDt: frameDt, every: every, after: after,
+    // 碰撞（collision.subl）
+    objOnCollide: objOnCollide, objIsColliding: objIsColliding,
+    objsByTag: objsByTag, objsDestroyTag: objsDestroyTag,
+};
+
+// 安装 __subl.call（不覆盖宿主/产物可能已有的 __sublmain 等字段）
+globalThis.__subl = globalThis.__subl || {};
+globalThis.__subl.call = function (op, args) {
+    var impl = __SG_OPS[op];
+    if (!impl) {
+        throw new Error("[SfG] 未知宿主桥 op：" + op + "（op 表见 game doc/游戏库.md）");
+    }
+    return impl.apply(undefined, args || []);
+};
+// 列出全部 op（供测试/插件框架枚举能力用）
+globalThis.__subl.ops = function () { return Object.keys(__SG_OPS); };
