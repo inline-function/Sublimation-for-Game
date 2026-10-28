@@ -101,6 +101,8 @@ fun isGameOp(fn: Str): Bool =
         "onKeyPress" => true
         "onKeyRelease" => true
         "onMouseDown" => true
+        "onMouseRelease" => true
+        "onMouseMove" => true
         "mousePosX" => true
         "mousePosY" => true
         // 循环（loop.subl）

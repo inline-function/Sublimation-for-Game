@@ -30,6 +30,8 @@ globalThis.kaplay = function (opts) {
         sprite: function (n) { return { comp: "sprite", name: n }; },
         pos: function (x, y) { return { comp: "pos", x: x, y: y }; },
         onKeyPress: function (k, f) { kaplayCalls.push({ fn: "onKeyPress", key: k }); },
+        onMouseRelease: function (b, f) { kaplayCalls.push({ fn: "onMouseRelease", btn: b }); if (f) f(b); },
+        onMouseMove: function (f) { kaplayCalls.push({ fn: "onMouseMove" }); if (f) f({ x: 10, y: 10 }); },
         go: function (n) { kaplayCalls.push({ fn: "go", name: n }); },
     };
 };
@@ -46,6 +48,10 @@ const stubApp = `
     globalThis.__sgResults = { width: w, height: h, comp: JSON.stringify(s.call("compSprite", ["bean"])), opsN: s.ops().length };
     var cb = function () { globalThis.__sgCbFired = true; };
     s.call("onKeyPress", ["space", cb]);
+    // 新增输入事件（t65）：松手/移动经单入口分派到 KAPLAY
+    var cb2 = function (m) { globalThis.__sgCb2Fired = true; globalThis.__sgCb2Arg = (m && m && m.x !== undefined) ? "pos" : String(m); };
+    s.call("onMouseRelease", ["left", cb2]);
+    s.call("onMouseMove", [cb2]);
     // @host 通道走单入口（t43 后生成器只出 __subl.call；裸名已回撤）
     try { s.call("gameGravity", [2.0]); s.call("sceneGo", ["aliasscene"]); globalThis.__sgAlias = "ok"; } catch (e) { globalThis.__sgAlias = String(e); }
     // 裸名不再以全局可见（闭包封装）：typeof 对未声明标识符安全
@@ -64,7 +70,10 @@ ok("返回值：viewWidth=800", globalThis.__sgResults.width === 800, JSON.strin
 ok("返回值：viewHeight=600", globalThis.__sgResults.height === 600, "");
 ok("返回值：compSprite 组件原样回传", globalThis.__sgResults.comp === '{"comp":"sprite","name":"bean"}', globalThis.__sgResults.comp);
 ok("回调实参（lambda）经桥存活", kaplayCalls.some((c) => c.fn === "onKeyPress" && c.key === "space"), "");
-ok("ops() 枚举 48 个 op（与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 48, String(globalThis.__sgResults.opsN));
+ok("__subl.call(onMouseRelease) 分派到 KAPLAY（btn=left）", kaplayCalls.some((c) => c.fn === "onMouseRelease" && c.btn === "left"), "");
+ok("__subl.call(onMouseMove) 分派到 KAPLAY", kaplayCalls.some((c) => c.fn === "onMouseMove"), "");
+ok("onMouseRelease/onMouseMove 回调经桥存活", globalThis.__sgCb2Fired === true, String(globalThis.__sgCb2Fired));
+ok("ops() 枚举 50 个 op（含 t65 新增 onMouseRelease/onMouseMove，与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 50, String(globalThis.__sgResults.opsN));
 
 
 // ---- 桩产物 2（隔离作用域）：gameStartFit + winWidth/winWidth ----

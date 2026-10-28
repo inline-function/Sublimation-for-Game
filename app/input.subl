@@ -12,6 +12,10 @@
 @game @host @impure fun onKeyRelease(key: Str, body: (Any) => Null): Null
 // 按下鼠标键："left"/"right"/"middle"。
 @game @host @impure fun onMouseDown(btn: Str, body: (Any) => Null): Null
+// 松开鼠标键："left"/"right"/"middle"（触屏语义同：手指抬起）。
+@game @host @impure fun onMouseRelease(btn: Str, body: (Any) => Null): Null
+// 鼠标移动（按住与否都触发；回调参数为位置句柄）。
+@game @host @impure fun onMouseMove(body: (Any) => Null): Null
 // 鼠标位置（像素）。
 @game @host @impure fun mousePosX(): Rat
 @game @host @impure fun mousePosY(): Rat

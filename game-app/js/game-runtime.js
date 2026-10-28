@@ -126,6 +126,10 @@ function onKeyDown(key, body) { __sgK().onKeyDown(key, function (k) { return bod
 function onKeyPress(key, body) { __sgK().onKeyPress(key, function (k) { return body(k); }); }
 function onKeyRelease(key, body) { __sgK().onKeyRelease(key, function (k) { return body(k); }); }
 function onMouseDown(btn, body) { __sgK().onMouseDown(btn, function (b) { return body(b); }); }
+// 松开鼠标键：松手这一刻触发一次（点击/拖拽分离的关键——不然拖拽态永远退不出）。
+function onMouseRelease(btn, body) { __sgK().onMouseRelease(btn, function (b) { return body(b); }); }
+// 鼠标移动（按住与否均触发；KAPLAY 回调参数为 (pos, delta)，取 pos 给回调体）。
+function onMouseMove(body) { __sgK().onMouseMove(function (m) { return body(m); }); }
 function mousePosX() { return __sgK().mousePos().x; }
 function mousePosY() { return __sgK().mousePos().y; }
 
@@ -168,7 +172,8 @@ var __SG_OPS = {
     vecX: vecX, vecY: vecY,
     // 输入（input.subl）
     onKeyDown: onKeyDown, onKeyPress: onKeyPress, onKeyRelease: onKeyRelease,
-    onMouseDown: onMouseDown, mousePosX: mousePosX, mousePosY: mousePosY,
+    onMouseDown: onMouseDown, onMouseRelease: onMouseRelease, onMouseMove: onMouseMove,
+    mousePosX: mousePosX, mousePosY: mousePosY,
     // 循环与计时（loop.subl）
     onUpdate: onUpdate, frameDt: frameDt, every: every, after: after,
     // 碰撞（collision.subl）
