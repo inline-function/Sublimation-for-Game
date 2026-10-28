@@ -62,7 +62,7 @@ function gameStart(width, height) {
     if (__sgCtx) throw new Error("[SfG] gameStart 只能调用一次");
     var init = (typeof kaplay === "function") ? kaplay : (kaplay && kaplay.default);
     if (typeof init !== "function") throw new Error("[SfG] 未找到 KAPLAY：页面需先引入 vendor/kaplay.js");
-    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), width: width, height: height, global: false });
+    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), texFilter: "linear", width: width, height: height, global: false });
     __sgViewInit(width, height, false);
 }
 
@@ -75,7 +75,10 @@ function gameStartFit(width, height, letterbox, crisp) {
     if (typeof init !== "function") throw new Error("[SfG] 未找到 KAPLAY：页面需先引入 vendor/kaplay.js");
     // pixelDensity：画布物理分辨率 = CSS 尺寸 × devicePixelRatio（手机 ~3）。
     // jn() 的视口用 drawingBufferWidth/pixelDensity 折算回 CSS 等效值，offset→世界映射不变。
-    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), width: width, height: height, global: false, stretch: true, letterbox: !!letterbox, crisp: !!crisp });
+    // texFilter：纹理采样滤波（与 crisp 两回事——crisp 只是 CSS image-rendering）。
+    // KAPLAY 默认 nearest 会把 2D canvas 字形自带的抗锯齿废掉：文字界面 crisp=false -> linear；
+    // 像素风 crisp=true -> nearest 保留硬边。
+    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), texFilter: crisp ? "nearest" : "linear", width: width, height: height, global: false, stretch: true, letterbox: !!letterbox, crisp: !!crisp });
     __sgViewInit(width, height, letterbox);
 }
 
