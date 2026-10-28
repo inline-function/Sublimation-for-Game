@@ -23,6 +23,12 @@
 "use strict";
 
 var __sgCtx = null;
+// 指针世界坐标（t66）：KAPLAY 的 mousePos 对 CSS rotate(90deg) 竖屏画布（元素盒与缓冲
+// 转置）与对触屏（用 rect 直减偏移）都不正确，且 mousedown/mouseup 不更新——
+// 桥改用 DOM 监听自维护 __sgPointer。
+var __sgPointer = null;
+var __sgView = { w: 960, h: 540 };
+var __sgLetterbox = false;
 
 /** 取 KAPLAY 上下文；未初始化给出可读错误。 */
 function __sgK() {
@@ -57,6 +63,7 @@ function gameStart(width, height) {
     var init = (typeof kaplay === "function") ? kaplay : (kaplay && kaplay.default);
     if (typeof init !== "function") throw new Error("[SfG] 未找到 KAPLAY：页面需先引入 vendor/kaplay.js");
     __sgCtx = init({ width: width, height: height, global: false });
+    __sgViewInit(width, height, false);
 }
 
 // 自适配窗口：stretch 恒开（画布跟随窗口尺寸），letterbox 保持宽高比（留黑边不变形），
@@ -67,6 +74,7 @@ function gameStartFit(width, height, letterbox, crisp) {
     var init = (typeof kaplay === "function") ? kaplay : (kaplay && kaplay.default);
     if (typeof init !== "function") throw new Error("[SfG] 未找到 KAPLAY：页面需先引入 vendor/kaplay.js");
     __sgCtx = init({ width: width, height: height, global: false, stretch: true, letterbox: !!letterbox, crisp: !!crisp });
+    __sgViewInit(width, height, letterbox);
 }
 
 function gameGravity(g) { __sgK().setGravity(g); }
@@ -77,14 +85,12 @@ function viewHeight() { return __sgK().height(); }
 // 真实窗口尺寸（CSS 像素；viewWidth/viewHeight 是逻辑画布尺寸）。
 // 无窗口环境（Node 桩）回落为画布逻辑尺寸，便于测试。
 function winWidth() {
-    var k = __sgK();
     if (typeof window !== "undefined" && typeof window.innerWidth === "number") return window.innerWidth;
-    return k.width();
+    return __sgK().width();
 }
 function winHeight() {
-    var k = __sgK();
     if (typeof window !== "undefined" && typeof window.innerHeight === "number") return window.innerHeight;
-    return k.height();
+    return __sgK().height();
 }
 
 // ---------- 精灵与游戏对象（sprite.subl） ----------
@@ -130,8 +136,58 @@ function onMouseDown(btn, body) { __sgK().onMouseDown(btn, function (b) { return
 function onMouseRelease(btn, body) { __sgK().onMouseRelease(btn, function (b) { return body(b); }); }
 // 鼠标移动（按住与否均触发；KAPLAY 回调参数为 (pos, delta)，取 pos 给回调体）。
 function onMouseMove(body) { __sgK().onMouseMove(function (m) { return body(m); }); }
-function mousePosX() { return __sgK().mousePos().x; }
-function mousePosY() { return __sgK().mousePos().y; }
+/** 画布元素局部偏移 -> 世界坐标。横屏元素盒=窗口=缓冲；竖屏 CSS rotate(90deg) 使
+ *  元素盒（100vh×100vw）与缓冲（窗口尺寸）转置，需先把 (offsetX,offsetY) 换算到缓冲
+ *  空间。letterbox 仅横屏启用（竖屏需拉伸铺满）。 */
+function __sgWorldFromOffset(ox, oy) {
+    var e = __sgView.w, n = __sgView.h;
+    var W = (typeof window !== "undefined" && typeof window.innerWidth === "number") ? window.innerWidth : e;
+    var H = (typeof window !== "undefined" && typeof window.innerHeight === "number") ? window.innerHeight : n;
+    var bx = ox, by = oy;
+    if (W < H) { bx = ox * W / H; by = oy * H / W; }
+    var s = W, i = H, m = 0, u = 0, c = s, p = i;
+    if (__sgLetterbox && !(W < H)) {
+        var b = s / i, l = e / n, hb;
+        if (b > l) { hb = i * l; m = (s - hb) / 2; c = hb; }
+        else { hb = s / l; p = hb; u = (i - hb) / 2; }
+    }
+    return { x: (bx - m) * e / c, y: (by - u) * n / p };
+}
+
+/** 屏幕客户坐标 -> 世界坐标（触屏：KAPLAY 用 rect 直减，先回到元素局部语义）。 */
+function __sgWorldFromClient(cx, cy) {
+    var W = (typeof window !== "undefined" && typeof window.innerWidth === "number") ? window.innerWidth : 0;
+    var H = (typeof window !== "undefined" && typeof window.innerHeight === "number") ? window.innerHeight : 0;
+    if (W && W < H) return __sgWorldFromOffset(cy, W - cx);
+    return __sgWorldFromOffset(cx, cy);
+}
+
+/** 记录画布尺寸/letterbox；注册 DOM 指针监听（鼠标 offsetX 语义 + 触屏客户坐标）。 */
+function __sgViewInit(w, h, letterbox) {
+    __sgView = { w: w, h: h };
+    __sgLetterbox = !!letterbox;
+    if (typeof document === "undefined" || !document.addEventListener) return;
+    var cv = (__sgCtx && __sgCtx.canvas) || document.querySelector("canvas");
+    if (!cv) return;
+    var trackOff = function (e2) {
+        if (typeof e2.offsetX === "number") __sgPointer = __sgWorldFromOffset(e2.offsetX, e2.offsetY);
+    };
+    var trackTouch = function (e2) {
+        var tch = e2.changedTouches && e2.changedTouches[0];
+        if (tch) __sgPointer = __sgWorldFromClient(tch.clientX, tch.clientY);
+    };
+    ["mousemove", "mousedown"].forEach(function (ev) { cv.addEventListener(ev, trackOff); });
+    ["touchstart", "touchmove", "touchend"].forEach(function (ev) { cv.addEventListener(ev, trackTouch, { passive: true }); });
+}
+
+function mousePosX() {
+    if (__sgPointer) return __sgPointer.x;
+    return __sgK().mousePos().x;
+}
+function mousePosY() {
+    if (__sgPointer) return __sgPointer.y;
+    return __sgK().mousePos().y;
+}
 
 // ---------- 循环与计时（loop.subl） ----------
 
