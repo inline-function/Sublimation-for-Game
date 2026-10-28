@@ -108,7 +108,18 @@ function compPos(x, y) { return __sgK().pos(x, y); }
 function compScale(s) { return __sgK().scale(s); }
 function compRect(w, h) { return __sgK().rect(w, h); }
 function compCircle(r) { return __sgK().circle(r); }
-function compText(t, size) { return __sgK().text(t, { size: size }); }
+// 统一字体 Maple Mono Normal CN；KAPLAY text 只认字体名（无 weight 通道），每字重独立 family。
+// 文本组件：weight 映射字重 family；width 触发 KAPLAY 原生折行（按真字体 measureText 量宽，
+// 消除 app 层宽度模型的偏差）；lineSpacing=行额外间距（行距= size + lineSpacing）。
+function compText(t, size, weight, width, lineSpacing) {
+    var fam = "MapleMonoCN";
+    if (weight === 600) fam = "MapleMonoCN-Semibold";
+    else if (weight === 700) fam = "MapleMonoCN-Bold";
+    var o = { size: size, font: fam };
+    if (width !== undefined && width !== null && width > 0) o.width = width;
+    if (lineSpacing !== undefined && lineSpacing !== null && lineSpacing > 0) o.lineSpacing = lineSpacing;
+    return __sgK().text(t, o);
+}
 function compArea() { return __sgK().area(); }
 function compBody() { return __sgK().body(); }
 function compSolid() { return __sgK().solid(); }

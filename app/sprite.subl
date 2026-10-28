@@ -19,8 +19,9 @@
 @game @host @impure fun compRect(w: Rat, h: Rat): Any
 // 圆组件：半径（像素）。
 @game @host @impure fun compCircle(r: Rat): Any
-// 文本组件：内容 + 字号（像素）。
-@game @host @impure fun compText(t: Str, size: Rat): Any
+// 文本组件：内容 + 字号（像素）。weight=字重（400/600/700）；width>0 触发 KAPLAY 原生折行
+// （按真实字体量宽，app 层无需自建宽度模型）；lineSpacing=行附加间距（行距= size + lineSpacing）。
+@game @host @impure fun compText(t: Str, size: Rat, weight: Nat, width: Rat = 0.0, lineSpacing: Rat = 0.0): Any
 // 颜色组件：接受 "#rrggbb" 或 "#rgb" 或颜色名（red/green/blue/yellow/white/black/gray/orange/purple/pink）。
 @game @host @impure fun compColorHex(hex: Str): Any
 // 碰撞区域组件：使对象参与碰撞检测（isColliding/onCollide 均需双方带 area）。
@@ -100,7 +101,7 @@ fun circleAdd(r: Rat, x: Rat, y: Rat, hex: Str): Any {
 @impure
 fun textAdd(t: Str, x: Rat, y: Rat, size: Rat): Any {
     var o = shapeAdd(x, y)
-    objUse(o, compText(t, size))
+    objUse(o, compText(t, size, 400))
     return o
 }
 
