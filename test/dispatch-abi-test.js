@@ -64,7 +64,24 @@ ok("返回值：viewWidth=800", globalThis.__sgResults.width === 800, JSON.strin
 ok("返回值：viewHeight=600", globalThis.__sgResults.height === 600, "");
 ok("返回值：compSprite 组件原样回传", globalThis.__sgResults.comp === '{"comp":"sprite","name":"bean"}', globalThis.__sgResults.comp);
 ok("回调实参（lambda）经桥存活", kaplayCalls.some((c) => c.fn === "onKeyPress" && c.key === "space"), "");
-ok("ops() 枚举 45 个 op（与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 45, String(globalThis.__sgResults.opsN));
+ok("ops() 枚举 48 个 op（与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 48, String(globalThis.__sgResults.opsN));
+
+
+// ---- 桩产物 2（隔离作用域）：gameStartFit + winWidth/winWidth ----
+const stubApp2 = `
+(function () {
+    var s = globalThis.__subl;
+    s.call("gameStartFit", [640, 480, true, true]);
+    var ww = s.call("winWidth", []);
+    var wh = s.call("winHeight", []);
+    globalThis.__sgFit = { width: ww, height: wh };
+}) ();
+`;
+new Function(runtimeJs + "\n" + stubApp2)();
+const fitInit = kaplayCalls.filter((c) => c.fn === "kaplay")[1];
+ok("__subl.call(gameStartFit) 分派到 KAPLAY（stretch+letterbox+crisp）", fitInit && fitInit.opts.width === 640 && fitInit.opts.height === 480 && fitInit.opts.global === false
+    && fitInit.opts.stretch === true && fitInit.opts.letterbox === true && fitInit.opts.crisp === true, JSON.stringify(fitInit && fitInit.opts));
+ok("winWidth/winHeight 无窗口回落为画布逻辑尺寸", globalThis.__sgFit.width === 640 && globalThis.__sgFit.height === 480, JSON.stringify(globalThis.__sgFit));
 
 // 未知 op 必须抛明确错误
 var unknownErr = null;

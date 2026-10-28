@@ -59,11 +59,14 @@ fun isGameOp(fn: Str): Bool =
     when (fn) {
         // 引擎与场景（op 名=声明函数名；宿主 __SG_OPS 一一对应）
         "gameStart" => true
+        "gameStartFit" => true
         "gameGravity" => true
         "sceneAdd" => true
         "sceneGo" => true
         "viewWidth" => true
         "viewHeight" => true
+        "winWidth" => true
+        "winHeight" => true
         // 资源（sprite.subl）
         "spriteLoad" => true
         // 组件

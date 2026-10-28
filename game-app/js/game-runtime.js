@@ -59,11 +59,33 @@ function gameStart(width, height) {
     __sgCtx = init({ width: width, height: height, global: false });
 }
 
+// 自适配窗口：stretch 恒开（画布跟随窗口尺寸），letterbox 保持宽高比（留黑边不变形），
+// crisp 关闭平滑插值（image-rendering: pixelated，像素风锐利）。
+// 俄罗斯方块这类 2D 网格游戏：gameStartFit(w, h, true, true)。
+function gameStartFit(width, height, letterbox, crisp) {
+    if (__sgCtx) throw new Error("[SfG] gameStart 只能调用一次");
+    var init = (typeof kaplay === "function") ? kaplay : (kaplay && kaplay.default);
+    if (typeof init !== "function") throw new Error("[SfG] 未找到 KAPLAY：页面需先引入 vendor/kaplay.js");
+    __sgCtx = init({ width: width, height: height, global: false, stretch: true, letterbox: !!letterbox, crisp: !!crisp });
+}
+
 function gameGravity(g) { __sgK().setGravity(g); }
 function sceneAdd(name, body) { __sgK().scene(name, function () { return body(null); }); }
 function sceneGo(name) { __sgK().go(name); }
 function viewWidth() { return __sgK().width(); }
 function viewHeight() { return __sgK().height(); }
+// 真实窗口尺寸（CSS 像素；viewWidth/viewHeight 是逻辑画布尺寸）。
+// 无窗口环境（Node 桩）回落为画布逻辑尺寸，便于测试。
+function winWidth() {
+    var k = __sgK();
+    if (typeof window !== "undefined" && typeof window.innerWidth === "number") return window.innerWidth;
+    return k.width();
+}
+function winHeight() {
+    var k = __sgK();
+    if (typeof window !== "undefined" && typeof window.innerHeight === "number") return window.innerHeight;
+    return k.height();
+}
 
 // ---------- 精灵与游戏对象（sprite.subl） ----------
 
@@ -129,8 +151,9 @@ function objsDestroyTag(t) { __sgK().destroyAll(t); }
 // 编译期由处理器拒绝，运行期由 dispatcher 抛「未知 op」。
 var __SG_OPS = {
     // 引擎与场景（game.subl）
-    gameStart: gameStart, gameGravity: gameGravity,
+    gameStart: gameStart, gameStartFit: gameStartFit, gameGravity: gameGravity,
     sceneAdd: sceneAdd, sceneGo: sceneGo, viewWidth: viewWidth, viewHeight: viewHeight,
+    winWidth: winWidth, winHeight: winHeight,
     // 资源（sprite.subl）
     spriteLoad: spriteLoad,
     // 组件（comp*.subl）

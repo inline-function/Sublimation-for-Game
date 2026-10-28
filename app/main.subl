@@ -433,7 +433,9 @@ fun runGame(): Null {
 
 @impure
 fun main(): Null {
-    gameStart(440, 480)
+    // 自适配窗口：stretch + letterbox（保持 440×480 宽高比、留黑边）+ crisp（关平滑插值，
+    // 2K 屏上放大不再模糊）。游戏逻辑坐标一个字都不用改——CELL/HUD 仍是逻辑坐标。
+    gameStartFit(440, 480, true, true)
     sceneAdd("main") { _e => runGame() }
     sceneGo("main")
     null

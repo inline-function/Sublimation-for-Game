@@ -105,6 +105,7 @@ const BOARD_X = 16.0, BOARD_Y = 8.0, CELL = 22.0;
 
 const init = __kaplayCalls.find(c => c.fn === "kaplay");
 ok("kaplay 以 440x480 初始化（global=false）", init && init.opts.width === 440 && init.opts.height === 480 && init.opts.global === false, JSON.stringify(init && init.opts));
+    ok("自适配：gameStartFit 开 stretch+letterbox+crisp", init && init.opts.stretch === true && init.opts.letterbox === true && init.opts.crisp === true, JSON.stringify(init && init.opts));
 ok("场景 main 已注册（gameover 由首次锁定时注册）", !!__sgScenes["main"], "scenes=" + Object.keys(__sgScenes).join(","));
 ok("main() 触发 sceneGo(main)", __kaplayCalls.some(c => c.fn === "go" && c.name === "main"), "");
 
@@ -214,6 +215,6 @@ ok("重开后状态重置（score: 0 文本重建）", freshScore.length >= 2, "
 ok("重开后新下落方块（最新一组 4 个）", lastPieces().length === 4 && lastPieces().every(o => o.comps.some(c => c.comp === "color")), "n=" + lastPieces().length);
 
 console.log(fails === 0
-    ? "SMOKE-TEST: ALL PASSED (28 项：俄罗斯方块完整局)"
+    ? "SMOKE-TEST: ALL PASSED (29 项：俄罗斯方块完整局 + 自适配窗口)"
     : "SMOKE-TEST: " + fails + " FAILED");
 if (fails > 0) process.exitCode = 1;

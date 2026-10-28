@@ -57,7 +57,7 @@ Game Over + 空格重开；纯逻辑与渲染分层，详见
 
 ## 架构要点
 
-- **桥接全经宿主桥单入口**：游戏能力全部是 @game @host @impure 无体声明（45 个），
+- **桥接全经宿主桥单入口**：游戏能力全部是 @game @host @impure 无体声明（48 个），
   函数体在壳工程 game-runtime.js 里用 KAPLAY 实现（闭包封装，仅暴露
   `globalThis.__subl.call`/`ops`，不污染页面全局——编译器 t43 统一单入口后已回撤裸名通道）。
   `__SG_OPS` 注册表为宿主单一真源，op 名与 game.subs 白名单一一对应。
