@@ -109,8 +109,10 @@ function compScale(s) { return __sgK().scale(s); }
 function compRect(w, h) { return __sgK().rect(w, h); }
 function compCircle(r) { return __sgK().circle(r); }
 // 统一字体 Maple Mono Normal CN；KAPLAY text 只认字体名（无 weight 通道），每字重独立 family。
-// 文本组件：weight 映射字重 family；width 触发 KAPLAY 原生折行（按真字体 measureText 量宽，
-// 消除 app 层宽度模型的偏差）；lineSpacing=行额外间距（行距= size + lineSpacing）。
+// 文本组件：统一字体 Maple Mono Normal CN（KAPLAY text 只认字体名字符串、无 weight 通道，
+// 故每字重独立 family，页面须预载：400 → MapleMonoCN / 600 → MapleMonoCN-Semibold / 700 → MapleMonoCN-Bold）。
+// width>0 触发 KAPLAY 原生折行（按真字体 measureText 量宽，消除 app 层宽度模型的偏差）；
+// lineSpacing=行额外间距（行距= size + lineSpacing）。
 function compText(t, size, weight, width, lineSpacing) {
     var fam = "MapleMonoCN";
     if (weight === 600) fam = "MapleMonoCN-Semibold";
