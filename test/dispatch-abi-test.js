@@ -73,7 +73,7 @@ ok("回调实参（lambda）经桥存活", kaplayCalls.some((c) => c.fn === "onK
 ok("__subl.call(onMouseRelease) 分派到 KAPLAY（btn=left）", kaplayCalls.some((c) => c.fn === "onMouseRelease" && c.btn === "left"), "");
 ok("__subl.call(onMouseMove) 分派到 KAPLAY", kaplayCalls.some((c) => c.fn === "onMouseMove"), "");
 ok("onMouseRelease/onMouseMove 回调经桥存活", globalThis.__sgCb2Fired === true, String(globalThis.__sgCb2Fired));
-ok("ops() 枚举 55 个 op（t65 onMouseRelease/onMouseMove + t68 地图 map*，与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 55, String(globalThis.__sgResults.opsN));
+ok("ops() 枚举 66 个 op（t65 onMouseRelease/onMouseMove + t68 地图 map*，与 game.subs 白名单一致）", globalThis.__sgResults.opsN === 66, String(globalThis.__sgResults.opsN));
 
 
 // ---- 桩产物 2（隔离作用域）：gameStartFit + winWidth/winWidth ----

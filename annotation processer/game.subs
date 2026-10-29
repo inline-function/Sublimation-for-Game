@@ -121,6 +121,18 @@ fun isGameOp(fn: Str): Bool =
         "mapProvName" => true
         "mapProvObj" => true
         "mapHitProv" => true
+        // 相机与手势（camera.subl）
+        "onScroll" => true
+        "camPos" => true
+        "camScale" => true
+        "compFixed" => true
+        "onTouchStart" => true
+        "onTouchMove" => true
+        "onTouchEnd" => true
+        "touchCount" => true
+        "touchX" => true
+        "touchY" => true
+        "compZ" => true
         else => false
     }
 

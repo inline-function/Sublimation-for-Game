@@ -27,6 +27,8 @@ var __sgCtx = null;
 // 转置）与对触屏（用 rect 直减偏移）都不正确，且 mousedown/mouseup 不更新——
 // 桥改用 DOM 监听自维护 __sgPointer。
 var __sgPointer = null;
+// 活跃触点表（identifier 索引，多指捏合用；camera.subl touchCount/touchX/touchY 读）
+var __sgTouches = [];
 var __sgView = { w: 960, h: 540 };
 var __sgLetterbox = false;
 
@@ -202,8 +204,24 @@ function __sgViewInit(w, h, letterbox) {
     var trackTouch = function (e2) {
         var tch = e2.changedTouches && e2.changedTouches[0];
         if (tch) __sgPointer = __sgWorldFromClient(tch.clientX, tch.clientY);
+        // 多指跟踪（捏合缩放）：按 identifier 维护活跃触点表
+        if (e2.changedTouches) {
+            for (var i = 0; i < e2.changedTouches.length; i++) {
+                var ct = e2.changedTouches[i];
+                if (e2.type === "touchend" || e2.type === "touchcancel") {
+                    __sgTouches = __sgTouches.filter(function (tp) { return tp.id !== ct.identifier; });
+                } else {
+                    var w = __sgWorldFromClient(ct.clientX, ct.clientY);
+                    var found = false;
+                    for (var j = 0; j < __sgTouches.length; j++) {
+                        if (__sgTouches[j].id === ct.identifier) { __sgTouches[j] = { id: ct.identifier, x: w.x, y: w.y }; found = true; break; }
+                    }
+                    if (!found) __sgTouches.push({ id: ct.identifier, x: w.x, y: w.y });
+                }
+            }
+        }
     };
-    ["mousemove", "mousedown"].forEach(function (ev) { cv.addEventListener(ev, trackOff); });
+    ["mousemove", "mousedown", "wheel"].forEach(function (ev) { cv.addEventListener(ev, trackOff); });
     ["touchstart", "touchmove", "touchend"].forEach(function (ev) { cv.addEventListener(ev, trackTouch, { passive: true }); });
 }
 
@@ -222,6 +240,26 @@ function onUpdate(body) { __sgK().onUpdate(function () { return body(__sgK().dt(
 function frameDt() { return __sgK().dt(); }
 function every(secs, body) { __sgK().loop(secs, function () { return body(null); }); }
 function after(secs, body) { __sgK().wait(secs, function () { return body(null); }); }
+
+// ---------- 相机与手势（camera.subl；t68+：地图自由缩放） ----------
+// 相机变换下的世界/屏幕坐标由 SfG 端自算逆变换（mapHitProv 吃世界坐标）。
+// 滚轮缩放手势：onScroll 回调参数为 deltaY（向下为正）。
+function onScroll(body) { __sgK().onScroll(function (d) { return body(d.y); }); }
+// 相机位置（视口中心的世界坐标）与缩放（x/y 同值用 camScale(s, s)）。
+function camPos(x, y) { __sgK().camPos(x, y); }
+function camScale(sx, sy) { __sgK().camScale(sx, sy); }
+// fixed 组件：对象脱离相机变换，固定在屏幕坐标（顶栏 UI 用）。
+function compFixed() { return __sgK().fixed(); }
+// 触屏开始/移动/结束（零信息回调；坐标取 touchX/touchY）。
+function onTouchStart(body) { __sgK().onTouchStart(function () { return body(null); }); }
+function onTouchMove(body) { __sgK().onTouchMove(function () { return body(null); }); }
+function onTouchEnd(body) { __sgK().onTouchEnd(function () { return body(null); }); }
+// 活跃触点数与坐标（世界系，无相机；按下标取，多指捏合用前两个）。
+// z 层级：对象按 z 升序绘制（同层按加入序），UI 给高 z 永远盖在地图之上。
+function compZ(z) { return __sgK().z(z); }
+function touchCount() { return __sgTouches.length; }
+function touchX(i) { return __sgTouches[i] ? __sgTouches[i].x : 0; }
+function touchY(i) { return __sgTouches[i] ? __sgTouches[i].y : 0; }
 
 // ---------- 碰撞（collision.subl） ----------
 
@@ -372,6 +410,10 @@ var __SG_OPS = {
     // 地图矢数据（geo.subl）
     mapLoad: mapLoad, mapProvCount: mapProvCount, mapProvName: mapProvName,
     mapProvObj: mapProvObj, mapHitProv: mapHitProv,
+    // 相机与手势（camera.subl）
+    onScroll: onScroll, camPos: camPos, camScale: camScale, compFixed: compFixed,
+    onTouchStart: onTouchStart, onTouchMove: onTouchMove, onTouchEnd: onTouchEnd,
+    touchCount: touchCount, touchX: touchX, touchY: touchY, compZ: compZ,
 };
 
 // 安装 __subl.call（不覆盖宿主/产物可能已有的 __subl.main 等字段）
