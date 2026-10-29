@@ -280,42 +280,94 @@ function objsDestroyTag(t) { __sgK().destroyAll(t); }
 var __SG_MAP_SEQ = 0;
 function __sgMapBakeSprite(p) {
     var K = __sgK();
+    // 硬边烘焙（t68+ 用户要求锐利像素边）：顶点 snap 到整数像素，
+    // 整数扫描线 even-odd 填充（mapHitProv 射线判定的水平线实例），
+    // Bresenham 1px 描边；全程 putImageData，无任何 AA。
+    var rings = [];
     var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
     for (var r = 0; r < p.rings.length; r++) {
         var ring = p.rings[r];
+        var out = [];
         for (var q = 0; q < ring.length; q++) {
-            var px = ring[q][0], py = ring[q][1];
-            if (px < minX) minX = px;
-            if (px > maxX) maxX = px;
-            if (py < minY) minY = py;
-            if (py > maxY) maxY = py;
+            var ix = Math.round(ring[q][0]), iy = Math.round(ring[q][1]);
+            out.push([ix, iy]);
+            if (ix < minX) minX = ix;
+            if (ix > maxX) maxX = ix;
+            if (iy < minY) minY = iy;
+            if (iy > maxY) maxY = iy;
         }
+        rings.push(out);
     }
-    var pad = 2.5;
+    var pad = 2;
     var bx = minX - pad, by = minY - pad;
-    var bw = Math.ceil((maxX - minX) + pad * 2), bh = Math.ceil((maxY - minY) + pad * 2);
-    var cv = document.createElement("canvas");
+    var bw = (maxX - minX) + pad * 2 + 2, bh = (maxY - minY) + pad * 2 + 2;
+    var cv = document.createElement('canvas');
     cv.width = bw; cv.height = bh;
-    var w = cv.getContext("2d");
-    if (!w) throw new Error("[SfG] mapLoad：无法创建 2d 上下文");
-    w.fillStyle = "#ffffff";
-    w.strokeStyle = "#000000";
-    w.lineWidth = 1.2;
-    w.lineJoin = "round";
-    for (var r2 = 0; r2 < p.rings.length; r2++) {
-        var ring2 = p.rings[r2];
-        w.beginPath();
-        for (var q2 = 0; q2 < ring2.length; q2++) {
-            var X = ring2[q2][0] - bx, Y = ring2[q2][1] - by;
-            if (q2 === 0) w.moveTo(X, Y); else w.lineTo(X, Y);
-        }
-        w.closePath();
-        w.fill();
-        w.stroke();
+    var ct = cv.getContext('2d');
+    if (!ct) throw new Error('[SfG] mapLoad：无法创建 2d 上下文');
+    var img = ct.createImageData(bw, bh);
+    var d = img.data;
+    function setPx(x, y, rr, gg, bb) {
+        if (x < 0 || y < 0 || x >= bw || y >= bh) return;
+        var i = (y * bw + x) * 4;
+        d[i] = rr; d[i + 1] = gg; d[i + 2] = bb; d[i + 3] = 255;
     }
-    var name = "sgmap" + (__SG_MAP_SEQ++);
+    // 局部整数环
+    var lr = [];
+    for (var r2 = 0; r2 < rings.length; r2++) {
+        var ring2 = rings[r2], out2 = [];
+        for (var q2 = 0; q2 < ring2.length; q2++) out2.push([ring2[q2][0] - bx, ring2[q2][1] - by]);
+        lr.push(out2);
+    }
+    // 填充：扫描线取整数 y，边按半开区间 [y0, y1) 求交，even-odd 配对，
+    // 跨度半开 [round(a), round(b))——相邻省共享边界列无重叠无缝。
+    for (var yy = 0; yy < bh; yy++) {
+        var xs = [];
+        for (var r3 = 0; r3 < lr.length; r3++) {
+            var rr2 = lr[r3];
+            for (var e = 0; e < rr2.length; e++) {
+                var a = rr2[e], b = rr2[(e + 1) % rr2.length];
+                if (a[1] === b[1]) continue;
+                var y0v = a[1], y1v = b[1];
+                if ((y0v <= yy && yy < y1v) || (y1v <= yy && yy < y0v)) {
+                    var tt = (yy - y0v) / (y1v - y0v);
+                    xs.push(a[0] + tt * (b[0] - a[0]));
+                }
+            }
+        }
+        xs.sort(function (a2, b2) { return a2 - b2; });
+        for (var i = 0; i + 1 < xs.length; i += 2) {
+            var x0 = Math.round(xs[i]), x1 = Math.round(xs[i + 1]);
+            if (x1 <= x0) x1 = x0 + 1;
+            for (var xx = x0; xx < x1; xx++) setPx(xx, yy, 255, 255, 255);
+        }
+    }
+    // 描边：Bresenham 逐像素 1px（细线 + 天然硬边），盖在填充之上。
+    function bres(x0, y0, x1, y1) {
+        var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+        var err = dx + dy;
+        while (true) {
+            setPx(x0, y0, 0, 0, 0);
+            if (x0 === x1 && y0 === y1) break;
+            var e2 = 2 * err;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    }
+    for (var r4 = 0; r4 < lr.length; r4++) {
+        var rr3 = lr[r4];
+        for (var e2 = 0; e2 < rr3.length; e2++) {
+            var c = rr3[e2], cc = rr3[(e2 + 1) % rr3.length];
+            bres(c[0], c[1], cc[0], cc[1]);
+        }
+    }
+    ct.putImageData(img, 0, 0);
+    var name = 'sgmap' + (__SG_MAP_SEQ++);
     K.loadSprite(name, cv);
-    return { name: p.name, sprite: name, x: bx, y: by, rings: p.rings };
+    // 注：纹理过滤由 vendor/kaplay.js 的纹理默认 NEAREST 决定（地图硬边）；
+    // 运行期 texParameteri 补丁在该上下文不生效，故不在此处理。
+    return { name: p.name, sprite: name, x: bx, y: by, rings: rings };
 }
 function mapLoad(t) {
     if (typeof t !== "string") throw new Error("[SfG] mapLoad 需要紧凑文本省份表（Str）");
