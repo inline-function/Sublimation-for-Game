@@ -115,6 +115,12 @@ fun isGameOp(fn: Str): Bool =
         "objIsColliding" => true
         "objsByTag" => true
         "objsDestroyTag" => true
+        // 地图矢数据（geo.subl）
+        "mapLoad" => true
+        "mapProvCount" => true
+        "mapProvName" => true
+        "mapProvObj" => true
+        "mapHitProv" => true
         else => false
     }
 

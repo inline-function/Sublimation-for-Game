@@ -161,6 +161,15 @@ function __sgWorldFromOffset(ox, oy) {
     var e = __sgView.w, n = __sgView.h;
     var W = (typeof window !== "undefined" && typeof window.innerWidth === "number") ? window.innerWidth : e;
     var H = (typeof window !== "undefined" && typeof window.innerHeight === "number") ? window.innerHeight : n;
+    // 横屏（含无头环境）下以画布元素盒为准：offsetX/offsetY 语义本就相对画布元素，
+    // 窗口尺寸在无头/滚动条/弹窗环境可能与画布盒不等，用窗口会把点击算偏（t68 地图点击暴露）。
+    // 竖屏旋转态由页面 CSS 决定（元素盒本就是横屏盒），保留窗口维度做归一化。
+    if (!(W < H)) {
+        var cv = (__sgCtx && __sgCtx.canvas) || null;
+        var wEl = (cv && typeof cv.clientWidth === "number") ? cv.clientWidth : 0;
+        var hEl = (cv && typeof cv.clientHeight === "number") ? cv.clientHeight : 0;
+        if (wEl > 0 && hEl > 0) { W = wEl; H = hEl; }
+    }
     var bx = ox, by = oy;
     if (W < H) { bx = ox * W / H; by = oy * H / W; }
     var s = W, i = H, m = 0, u = 0, c = s, p = i;
@@ -221,6 +230,113 @@ function objIsColliding(a, b) { return a.isColliding(b); }
 function objsByTag(t) { return __sgK().get(t); }
 function objsDestroyTag(t) { __sgK().destroyAll(t); }
 
+// ---------- 地图矢数据（geo.subl；t68：中国行政区划演示） ----------
+// 省级行政区划这类「凹多边形 + 多环」形状：rect 拼接难看、area() 的 rect 命中
+// 对狭长省会误触，故单独给一组 op。
+// 文本省份表格式（mapLoad 解析）：
+//   "省名:环;环;...|省名:环;环;..."，环 = "x y,x y,..."（世界坐标像素，1 位小数）。
+// 烘焙策略：每省一个 canvas2d 精灵（白底 fill + 1.2px 黑边 stroke）——canvas2d 填充
+// 对任意凹多边形/多环天然正确且边缘抗锯齿；渲染期只按需 tint
+// （objUse(o, compColorHex(新色)) 换组件即换色）：白底×tint=填充色、黑边×tint=黑。
+// 命中判定 mapHitProv 用射线法点在多边形内（精确，取代 area() 的 rect 命中）。
+var __SG_MAP_SEQ = 0;
+function __sgMapBakeSprite(p) {
+    var K = __sgK();
+    var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    for (var r = 0; r < p.rings.length; r++) {
+        var ring = p.rings[r];
+        for (var q = 0; q < ring.length; q++) {
+            var px = ring[q][0], py = ring[q][1];
+            if (px < minX) minX = px;
+            if (px > maxX) maxX = px;
+            if (py < minY) minY = py;
+            if (py > maxY) maxY = py;
+        }
+    }
+    var pad = 2.5;
+    var bx = minX - pad, by = minY - pad;
+    var bw = Math.ceil((maxX - minX) + pad * 2), bh = Math.ceil((maxY - minY) + pad * 2);
+    var cv = document.createElement("canvas");
+    cv.width = bw; cv.height = bh;
+    var w = cv.getContext("2d");
+    if (!w) throw new Error("[SfG] mapLoad：无法创建 2d 上下文");
+    w.fillStyle = "#ffffff";
+    w.strokeStyle = "#000000";
+    w.lineWidth = 1.2;
+    w.lineJoin = "round";
+    for (var r2 = 0; r2 < p.rings.length; r2++) {
+        var ring2 = p.rings[r2];
+        w.beginPath();
+        for (var q2 = 0; q2 < ring2.length; q2++) {
+            var X = ring2[q2][0] - bx, Y = ring2[q2][1] - by;
+            if (q2 === 0) w.moveTo(X, Y); else w.lineTo(X, Y);
+        }
+        w.closePath();
+        w.fill();
+        w.stroke();
+    }
+    var name = "sgmap" + (__SG_MAP_SEQ++);
+    K.loadSprite(name, cv);
+    return { name: p.name, sprite: name, x: bx, y: by, rings: p.rings };
+}
+function mapLoad(t) {
+    if (typeof t !== "string") throw new Error("[SfG] mapLoad 需要紧凑文本省份表（Str）");
+    var provs = [];
+    var lines = t.split("|");
+    for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        if (!line) continue;
+        var sep = line.indexOf(":");
+        if (sep < 0) continue;
+        var name = line.slice(0, sep);
+        var ringStrs = line.slice(sep + 1).split(";");
+        var rings = [];
+        for (var ri = 0; ri < ringStrs.length; ri++) {
+            if (!ringStrs[ri]) continue;
+            var pts = ringStrs[ri].split(",");
+            var ring = [];
+            for (var qi = 0; qi < pts.length; qi++) {
+                var sp = pts[qi].indexOf(" ");
+                if (sp < 0) continue;
+                ring.push([parseFloat(pts[qi].slice(0, sp)), parseFloat(pts[qi].slice(sp + 1))]);
+            }
+            if (ring.length >= 3) rings.push(ring);
+        }
+        if (rings.length > 0) provs.push(__sgMapBakeSprite({ name: name, rings: rings }));
+    }
+    return { provs: provs };
+}
+function mapProvCount(m) { return m.provs.length; }
+function mapProvName(m, i) { return m.provs[i].name; }
+// 创建省份精灵对象（位置=烘焙 bbox 左上角），hex 为填充 tint。
+// 高亮换色：重新 objUse(o, compColorHex(新色))（use 按组件 id 替换）。
+function mapProvObj(m, i, hex) {
+    var p = m.provs[i];
+    var o = objAdd();
+    objUse(o, compSprite(p.sprite));
+    objUse(o, compPos(p.x, p.y));
+    objUse(o, compColorHex(hex));
+    return o;
+}
+// 射线法点在多边形内（对甘肃/内蒙古等狭长省精确；区划互不重叠，按数据序首个命中）。
+// 未命中返回 -1。
+function mapHitProv(m, x, y) {
+    for (var i = 0; i < m.provs.length; i++) {
+        var rings = m.provs[i].rings;
+        for (var r = 0; r < rings.length; r++) {
+            var ring = rings[r];
+            var inside = false;
+            for (var q = 0, s = ring.length - 1; q < ring.length; s = q++) {
+                var x1 = ring[q][0], y1 = ring[q][1];
+                var x2 = ring[s][0], y2 = ring[s][1];
+                if (((y1 > y) !== (y2 > y)) && (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)) inside = !inside;
+            }
+            if (inside) return i;
+        }
+    }
+    return -1;
+}
+
 // ============================================================================
 // 宿主桥单入口（t38 定案 ABI）：globalThis.__subl.call(op, args)
 // ============================================================================
@@ -253,6 +369,9 @@ var __SG_OPS = {
     // 碰撞（collision.subl）
     objOnCollide: objOnCollide, objIsColliding: objIsColliding,
     objsByTag: objsByTag, objsDestroyTag: objsDestroyTag,
+    // 地图矢数据（geo.subl）
+    mapLoad: mapLoad, mapProvCount: mapProvCount, mapProvName: mapProvName,
+    mapProvObj: mapProvObj, mapHitProv: mapHitProv,
 };
 
 // 安装 __subl.call（不覆盖宿主/产物可能已有的 __subl.main 等字段）
