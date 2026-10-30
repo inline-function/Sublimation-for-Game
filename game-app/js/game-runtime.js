@@ -64,7 +64,9 @@ function gameStart(width, height) {
     if (__sgCtx) throw new Error("[SfG] gameStart 只能调用一次");
     var init = (typeof kaplay === "function") ? kaplay : (kaplay && kaplay.default);
     if (typeof init !== "function") throw new Error("[SfG] 未找到 KAPLAY：页面需先引入 vendor/kaplay.js");
-    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), texFilter: "linear", width: width, height: height, global: false });
+    // background：SfG 默认深色底（#101820）。不传时 KAPLAY 用 2x2 棋盘格 bgTex 平铺整个画布——
+    // 画面任何未绘制区域（视口边角/未覆盖海域）会露出黑白格子，故一律换成深色清屏。
+    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), texFilter: "linear", width: width, height: height, global: false, background: "#101820" });
     __sgViewInit(width, height, false);
 }
 
@@ -80,7 +82,8 @@ function gameStartFit(width, height, letterbox, crisp) {
     // texFilter：纹理采样滤波（与 crisp 两回事——crisp 只是 CSS image-rendering）。
     // KAPLAY 默认 nearest 会把 2D canvas 字形自带的抗锯齿废掉：文字界面 crisp=false -> linear；
     // 像素风 crisp=true -> nearest 保留硬边。
-    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), texFilter: crisp ? "nearest" : "linear", width: width, height: height, global: false, stretch: true, letterbox: !!letterbox, crisp: !!crisp });
+    // background：同 gameStart——代替 KAPLAY 默认棋盘格，未绘制区域一律深色（地图海面同色 #101820）。
+    __sgCtx = init({ pixelDensity: ((typeof window !== "undefined" && window.devicePixelRatio) || 1), texFilter: crisp ? "nearest" : "linear", width: width, height: height, global: false, stretch: true, letterbox: !!letterbox, crisp: !!crisp, background: "#101820" });
     __sgViewInit(width, height, letterbox);
 }
 
@@ -367,7 +370,8 @@ function __sgMapBakeSprite(p) {
     K.loadSprite(name, cv);
     // 注：纹理过滤由 vendor/kaplay.js 的纹理默认 NEAREST 决定（地图硬边）；
     // 运行期 texParameteri 补丁在该上下文不生效，故不在此处理。
-    return { name: p.name, sprite: name, x: bx, y: by, rings: rings };
+    // 烘焙 bbox（含 pad）：命中预筛与无碰撞跳过用。
+    return { name: p.name, sprite: name, x: bx, y: by, x1: (bx + bw) - 1, y1: (by + bh) - 1, rings: rings };
 }
 function mapLoad(t) {
     if (typeof t !== "string") throw new Error("[SfG] mapLoad 需要紧凑文本省份表（Str）");
@@ -411,8 +415,12 @@ function mapProvObj(m, i, hex) {
 // 射线法点在多边形内（对甘肃/内蒙古等狭长省精确；区划互不重叠，按数据序首个命中）。
 // 未命中返回 -1。
 function mapHitProv(m, x, y) {
+    // bbox 预筛：354 省级表不做预筛会逐环全扫（t72 东亚地图）；
+    // 区划互不重叠，框外直接跳过，框内才走逐环射线法。
     for (var i = 0; i < m.provs.length; i++) {
-        var rings = m.provs[i].rings;
+        var p0 = m.provs[i];
+        if (x < p0.x || y < p0.y || x > p0.x1 || y > p0.y1) continue;
+        var rings = p0.rings;
         for (var r = 0; r < rings.length; r++) {
             var ring = rings[r];
             var inside = false;
