@@ -139,6 +139,7 @@ fun isGameOp(fn: Str): Bool =
         "bgmPlay" => true
         "bgmStop" => true
         "sndPlay" => true
+        "rndInt" => true
         else => false
     }
 
