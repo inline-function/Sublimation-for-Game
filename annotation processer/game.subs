@@ -74,6 +74,7 @@ fun isGameOp(fn: Str): Bool =
         "compPos" => true
         "compScale" => true
         "compRect" => true
+        "compRectR" => true
         "compCircle" => true
         "compText" => true
         "compColorHex" => true
@@ -133,6 +134,11 @@ fun isGameOp(fn: Str): Bool =
         "touchX" => true
         "touchY" => true
         "compZ" => true
+        // 音频（audio.subl）
+        "bgmMount" => true
+        "bgmPlay" => true
+        "bgmStop" => true
+        "sndPlay" => true
         else => false
     }
 
